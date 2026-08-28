@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.28)
 
 # Версия по умолчанию — сверяется check-version.mjs (§10 ТЗ).
 # CI передаёт точное значение через -DYAWAMETRICS_VERSION="X.Y.Z" (в кавычках, ОР-8).
-set(YAWAMETRICS_DEFAULT_VERSION "2.1.1")
+set(YAWAMETRICS_DEFAULT_VERSION "2.1.2")
 if(NOT YAWAMETRICS_VERSION)
     set(YAWAMETRICS_VERSION "${YAWAMETRICS_DEFAULT_VERSION}")
 endif()

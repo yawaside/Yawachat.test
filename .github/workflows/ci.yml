@@ -102,6 +102,13 @@ jobs:
       - name: Build (yawametrics.dll)
         run: cmake --build --preset windows-ci-x64
 
+      - name: Qt compatibility gate (qt_version_tag <= 6.6)
+        # OBS 30.0–32.2.2 поставляет Qt 6.6–6.11: плагин обязан собираться
+        # с Qt не новее 6.6, иначе он не загрузится в старых сборках OBS
+        # (подробности и матрица Qt — в шапке check-qt-compat.ps1).
+        shell: pwsh
+        run: .github/scripts/check-qt-compat.ps1 -SearchRoot "native/.build" -MaxQtMajor 6 -MaxQtMinor 6
+
       - name: Package manual-install ZIP (§9.1)
         shell: pwsh
         run: .github/scripts/package-zip.ps1 -Version "${{ steps.version.outputs.version }}"
@@ -153,12 +160,21 @@ jobs:
           if (Test-Path $staging) { Remove-Item $staging -Recurse -Force }
           Expand-Archive -Path $zip.FullName -DestinationPath $staging -Force
 
-          choco install innosetup -y --no-progress
+          # Inno Setup ставится напрямую с официального релиза jrsoftware:
+          # Chocolatey не гарантирован на образах windows-latest (миграция
+          # на Windows Server 2025 / VS 2026) и choco install уже падал.
+          $innoInstaller = Join-Path $env:RUNNER_TEMP "innosetup-6.7.3.exe"
+          Invoke-WebRequest -Uri "https://github.com/jrsoftware/issrc/releases/download/is-6_7_3/innosetup-6.7.3.exe" -OutFile $innoInstaller -UseBasicParsing
+          Start-Process -FilePath $innoInstaller -ArgumentList "/VERYSILENT","/NORESTART","/SUPPRESSMSGBOXES" -Wait
+          $iscc = Join-Path ${env:ProgramFiles(x86)} "Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { throw "ISCC.exe not found at $iscc" }
+
           $outputDir = Join-Path $env:RUNNER_TEMP "installer-out"
           New-Item -ItemType Directory -Path $outputDir -Force | Out-Null
 
           # ОР-7: опции iscc передаются до имени скрипта.
-          iscc "/DMyAppVersion=$version" "/DStagingDir=$staging" "/O$outputDir" "installer\YawaMetrics.iss"
+          & $iscc "/DMyAppVersion=$version" "/DStagingDir=$staging" "/O$outputDir" "installer\YawaMetrics.iss"
+          if ($LASTEXITCODE -ne 0) { throw "iscc failed (exit code $LASTEXITCODE)" }
 
           $exe = Get-ChildItem $outputDir -Filter *.exe | Select-Object -First 1
           if (-not $exe) { throw "Installer was not produced" }

@@ -1,6 +1,6 @@
 # YawaMetrics — нативная док-панель OBS Studio
 
-![version](https://img.shields.io/badge/version-2.1.1-8b5cf6) ![platform](https://img.shields.io/badge/platform-Windows%20x64-121222) ![obs](https://img.shields.io/badge/OBS%20Studio-30%2B-22c55e) ![license](https://img.shields.io/badge/license-GPL--2.0--or--later-f43f5e)
+![version](https://img.shields.io/badge/version-2.1.2-8b5cf6) ![platform](https://img.shields.io/badge/platform-Windows%20x64-121222) ![obs](https://img.shields.io/badge/OBS%20Studio-30%2B-22c55e) ![license](https://img.shields.io/badge/license-GPL--2.0--or--later-f43f5e)
 
 **YawaMetrics** показывает в OBS Studio суммарное количество зрителей
 мультистрима в реальном времени — без API-ключей: достаточно ссылки на канал.
@@ -83,7 +83,7 @@ CORS-заголовки); счётчики остальных площадок �
 ./scripts/Install-ObsDeps.ps1
 
 # 2. Сконфигурировать и собрать (версию передавать в кавычках):
-cmake --preset windows-ci-x64 "-DYAWAMETRICS_VERSION=2.1.1"
+cmake --preset windows-ci-x64 "-DYAWAMETRICS_VERSION=2.1.2"
 cmake --build --preset windows-ci-x64
 ```
 

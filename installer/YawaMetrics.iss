@@ -2,7 +2,7 @@
 ; Version is checked by .github/scripts/check-version.mjs — keep in sync.
 
 #define MyAppName "YawaMetrics"
-#define MyAppVersion "2.1.1"
+#define MyAppVersion "2.1.2"
 #define MyAppPublisher "yawaside"
 #define MyAppURL "https://github.com/yawaside/YawaMetricks.OBS.plugin"
 #define MyAppExeName "obs64.exe"
