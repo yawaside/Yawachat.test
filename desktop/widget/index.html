@@ -1,0 +1,251 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <title>YawaChatHub — OBS widget</title>
+    <style>
+      :root { color-scheme: dark; }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; }
+      body {
+        font-family: var(--font, "Onest", "Segoe UI", system-ui, sans-serif);
+        padding: 10px;
+        display: flex;
+        flex-direction: column;
+        justify-content: flex-end;
+        gap: 6px;
+      }
+      #stack { display: flex; flex-direction: column; gap: 6px; }
+      .msg {
+        position: relative;
+        overflow: hidden;
+        padding: var(--pad, 12px);
+        border-radius: var(--r, 12px);
+        background: var(--bg, rgba(10, 11, 18, 0.7));
+        border: 1px solid var(--border, transparent);
+        box-shadow: var(--shadow, none);
+        animation: pop 0.22s ease-out;
+        word-break: break-word;
+        color: var(--text, #f2f3f8);
+      }
+      .msg .accent { position: absolute; inset: 0 auto 0 0; width: 3px; background: var(--accent, #a78bfa); }
+      .msg .row { display: flex; align-items: flex-start; gap: 9px; }
+      .msg .head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; }
+      .msg .who { font-weight: var(--fw, 600); }
+      .msg .time { color: var(--time, rgba(255,255,255,0.45)); }
+      .msg .body { margin-top: 2px; line-height: 1.35; }
+      .msg .plat {
+        display: grid; place-items: center; border-radius: 8px; flex: none;
+      }
+      .msg .plat svg { width: 62%; height: 62%; }
+      .msg.fade { opacity: 0; transform: translateY(-6px); transition: all 0.35s ease; }
+      @keyframes pop { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+      #hint {
+        font-family: ui-monospace, Consolas, monospace; font-size: 11px;
+        opacity: 0.6; color: #9aa1b5;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="stack"></div>
+    <div id="hint">ожидание сообщений…</div>
+
+    <script>
+      // Виджет получает все настройки через query-строку — отдельного конфига нет.
+      const q = new URLSearchParams(location.search);
+      const token = q.get("token") || "";
+      const port = q.get("port") || location.port || "47823";
+      const theme = q.get("theme") || "minimal-dark";
+      const fontSize = parseInt(q.get("fs") || "16", 10);
+      const bgOpacity = parseInt(q.get("bg") || "70", 10);
+      const radius = parseInt(q.get("r") || "12", 10);
+      const ttl = parseInt(q.get("ttl") || "8", 10);
+      const dir = q.get("dir") || "up";
+      const shadow = q.get("shadow") === "1";
+      const showPlatform = q.get("plat") === "1";
+      const showTime = q.get("time") === "1";
+      const maxMessages = parseInt(q.get("max") || "8", 10);
+
+      // Оформление: шрифт, размеры, видимость элементов и свои цвета.
+      const fontId = q.get("ff") || "onest";
+      const fontWeight = parseInt(q.get("fw") || "600", 10);
+      const authorScale = parseFloat(q.get("as") || "0.92");
+      const padding = parseInt(q.get("pad") || "12", 10);
+      const showAuthor = (q.get("author") ?? "1") === "1";
+      const showBorder = (q.get("brd") ?? "1") === "1";
+      const showAccent = (q.get("acc") ?? "1") === "1";
+      const authorFromPlatform = (q.get("apf") ?? "1") === "1";
+      const custom = {
+        bg: q.get("cbg") || "",
+        text: q.get("ctx") || "",
+        author: q.get("cau") || "",
+        time: q.get("ctm") || "",
+        border: q.get("cbd") || "",
+        accent: q.get("cac") || "",
+      };
+
+      const FONTS = {
+        onest: '"Onest", "Segoe UI", system-ui, sans-serif',
+        inter: '"Inter", "Segoe UI", system-ui, sans-serif',
+        system: 'system-ui, "Segoe UI", Roboto, sans-serif',
+        rounded: '"Nunito", "Segoe UI Rounded", "Onest", sans-serif',
+        display: '"Unbounded", "Onest", sans-serif',
+        mono: '"JetBrains Mono", ui-monospace, Consolas, monospace',
+        serif: 'Georgia, "Times New Roman", serif',
+      };
+
+      const THEMES = {
+        "minimal-dark":  { bg: "10, 11, 18",    text: "#f2f3f8", name: "#a78bfa", sub: "rgba(242,243,248,0.45)", border: "rgba(255,255,255,0.10)", shadow: "0 2px 14px rgba(0,0,0,0.35)" },
+        "minimal-light": { bg: "248, 249, 252", text: "#171a26", name: "#7c3aed", sub: "rgba(23,26,38,0.5)",     border: "rgba(23,26,38,0.10)",   shadow: "0 2px 14px rgba(23,26,38,0.14)" },
+        neon:            { bg: "6, 8, 16",      text: "#e8fdff", name: "#22d3ee", sub: "rgba(232,253,255,0.5)",  border: "rgba(34,211,238,0.35)", shadow: "0 0 18px rgba(34,211,238,0.28)" },
+        obsidian:        { bg: "5, 6, 12",      text: "#f5f7fb", name: "#c4b5fd", sub: "rgba(245,247,251,0.42)", border: "rgba(167,139,250,0.22)", shadow: "0 10px 34px rgba(0,0,0,0.42)" },
+        terminal:        { bg: "2, 10, 8",      text: "#d1fae5", name: "#34d399", sub: "rgba(209,250,229,0.45)", border: "rgba(52,211,153,0.26)", shadow: "0 0 18px rgba(52,211,153,0.16)" },
+        sunset:          { bg: "24, 10, 20",    text: "#fff7ed", name: "#fb923c", sub: "rgba(255,247,237,0.45)", border: "rgba(251,146,60,0.25)", shadow: "0 8px 28px rgba(251,113,133,0.18)" },
+        frost:           { bg: "226, 239, 255", text: "#0f172a", name: "#2563eb", sub: "rgba(15,23,42,0.45)",    border: "rgba(37,99,235,0.20)",  shadow: "0 8px 28px rgba(15,23,42,0.12)" },
+        amoled:          { bg: "0, 0, 0",       text: "#f3f4f6", name: "#a78bfa", sub: "rgba(243,244,246,0.45)", border: "rgba(255,255,255,0.14)", shadow: "none" },
+        latte:           { bg: "252, 247, 240", text: "#3f3a37", name: "#b45309", sub: "rgba(63,58,55,0.45)",    border: "rgba(180,83,9,0.2)",    shadow: "0 8px 24px rgba(63,58,55,0.14)" },
+      };
+      const PLAT = {
+        twitch: "#a970ff", youtube: "#ff4e45", vk: "#4c8dff", kick: "#53fc18", tiktok: "#ff3b5c",
+      };
+
+      const t = THEMES[theme] || THEMES["minimal-dark"];
+
+      function hexToRgba(hex, alpha) {
+        const raw = String(hex).replace("#", "");
+        const full = raw.length === 3 ? raw.split("").map((c) => c + c).join("") : raw;
+        const num = parseInt(full, 16);
+        if (isNaN(num)) return null;
+        return `rgba(${(num >> 16) & 255}, ${(num >> 8) & 255}, ${num & 255}, ${alpha})`;
+      }
+
+      const alpha = Math.max(0, Math.min(100, bgOpacity)) / 100;
+      const background = (custom.bg && hexToRgba(custom.bg, alpha)) || `rgba(${t.bg}, ${alpha})`;
+      const colors = {
+        text: custom.text || t.text,
+        author: custom.author || t.name,
+        time: custom.time || t.sub,
+        border: custom.border || t.border,
+        accent: custom.accent || t.name,
+      };
+
+      const root = document.documentElement;
+      root.style.setProperty("--font", FONTS[fontId] || FONTS.onest);
+      root.style.setProperty("--fw", String(fontWeight));
+      root.style.setProperty("--pad", padding + "px");
+      root.style.setProperty("--bg", background);
+      root.style.setProperty("--text", colors.text);
+      root.style.setProperty("--time", colors.time);
+      root.style.setProperty("--accent", colors.accent);
+      root.style.setProperty("--border", showBorder ? colors.border : "transparent");
+      root.style.setProperty("--shadow", shadow ? (t.shadow || "0 8px 26px rgba(0,0,0,0.34)") : "none");
+      root.style.setProperty("--r", radius + "px");
+      if (dir === "down") document.body.style.justifyContent = "flex-start";
+
+      const stack = document.getElementById("stack");
+      const hint = document.getElementById("hint");
+
+      function addMessage(m) {
+        if (!m || !m.text) return;
+        hint.style.display = "none";
+
+        const el = document.createElement("div");
+        el.className = "msg";
+        el.style.fontSize = fontSize + "px";
+
+        if (showAccent) {
+          const bar = document.createElement("span");
+          bar.className = "accent";
+          el.appendChild(bar);
+        }
+
+        const row = document.createElement("div");
+        row.className = "row";
+        if (showAccent) row.style.paddingLeft = "6px";
+
+        if (showPlatform) {
+          const chip = document.createElement("span");
+          chip.className = "plat";
+          const size = Math.round(fontSize * 1.6);
+          chip.style.width = size + "px";
+          chip.style.height = size + "px";
+          chip.style.background = (PLAT[m.platform] || "#a78bfa") + "24";
+          const dot = document.createElement("span");
+          dot.style.width = "45%";
+          dot.style.height = "45%";
+          dot.style.borderRadius = "50%";
+          dot.style.background = PLAT[m.platform] || "#a78bfa";
+          chip.appendChild(dot);
+          row.appendChild(chip);
+        }
+
+        const content = document.createElement("div");
+        content.style.minWidth = "0";
+        content.style.flex = "1";
+
+        if (showAuthor || showTime) {
+          const head = document.createElement("div");
+          head.className = "head";
+          if (showAuthor) {
+            const who = document.createElement("span");
+            who.className = "who";
+            who.textContent = m.author || "зритель";
+            who.style.fontSize = Math.round(fontSize * authorScale) + "px";
+            who.style.color = authorFromPlatform
+              ? (m.color || PLAT[m.platform] || colors.author)
+              : colors.author;
+            head.appendChild(who);
+          }
+          if (showTime) {
+            const time = document.createElement("span");
+            time.className = "time";
+            const d = new Date(m.ts || Date.now());
+            time.textContent =
+              String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
+            time.style.fontSize = Math.round(fontSize * 0.66) + "px";
+            head.appendChild(time);
+          }
+          content.appendChild(head);
+        }
+
+        const body = document.createElement("div");
+        body.className = "body";
+        body.textContent = m.text;
+        content.appendChild(body);
+
+        row.appendChild(content);
+        el.appendChild(row);
+
+        if (dir === "down") stack.appendChild(el);
+        else stack.insertBefore(el, stack.firstChild);
+
+        while (stack.children.length > maxMessages) {
+          stack.removeChild(dir === "down" ? stack.firstChild : stack.lastChild);
+        }
+        if (ttl > 0) {
+          setTimeout(() => {
+            el.classList.add("fade");
+            setTimeout(() => el.remove(), 400);
+          }, ttl * 1000);
+        }
+      }
+
+      function connect() {
+        const ws = new WebSocket("ws://127.0.0.1:" + port + "/ws?token=" + encodeURIComponent(token));
+        ws.onmessage = (ev) => {
+          try {
+            const data = JSON.parse(ev.data);
+            if (data.type === "chat") addMessage(data.msg);
+          } catch { /* noop */ }
+        };
+        ws.onclose = () => {
+          hint.style.display = "block";
+          hint.textContent = "нет соединения — переподключение…";
+          setTimeout(connect, 3000);
+        };
+        ws.onerror = () => ws.close();
+      }
+      connect();
+    </script>
+  </body>
+</html>
