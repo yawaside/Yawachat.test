@@ -127,6 +127,14 @@ bool parseColor(const QString& text, QColor* out)
 // AppConfig
 // ---------------------------------------------------------------------------
 
+AppConfig::AppConfig()
+{
+    // ФТ-5.10: VK/Twitch/YouTube — включены по умолчанию.
+    platforms[0].enabled = true; // Vk
+    platforms[1].enabled = true; // Twitch
+    platforms[2].enabled = true; // YouTube
+}
+
 PlatformSettings& AppConfig::platform(PlatformId id)
 {
     return platforms[platformIndex(id)];

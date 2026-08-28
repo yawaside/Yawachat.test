@@ -425,6 +425,10 @@ function totalViewers() {
 }
 
 function enabled(key) {
+  // Демо-режим без заданных каналов показывает все площадки: иначе виджет
+  // пуст и оценить оформление нельзя.
+  if (isDemo() && !hasChannels())
+    return true;
   return String(S[key] || "").trim() !== "";
 }
 
@@ -488,19 +492,40 @@ function parseResponse(key, body) {
              title: jsonUnescape(firstMatch(body, /"title"\s*:\s*"((?:\\.|[^"\\])*)"/) || "") };
   }
   if (key === "yt") {
-    let viewersText = firstMatch(body, /"viewCount"\s*:\s*\{[\s\S]{0,420}?"simpleText"\s*:\s*"([^"]+)"/);
-    if (!viewersText)
-      viewersText = firstMatch(body, /"shortViewCountText"\s*:\s*\{[\s\S]{0,320}?"(?:simpleText|text)"\s*:\s*"([^"]+)"/);
-    const live = /"isLive"\s*:\s*true/.test(body) || !!viewersText;
+    /* Зрители (приоритет): videoViewCountRenderer.runs → originalViewCount →
+       simpleText → shortViewCountText. videoDetails.viewCount — суммарные
+       просмотры видео, НЕ зрители (ФТ-2.3). */
+    let live = /"isLive"\s*:\s*true/.test(body)
+        || /"liveBroadcastDetails"\s*:\s*\{[\s\S]{0,240}?"isLiveNow"\s*:\s*true/.test(body);
+    let viewersText = firstMatch(body,
+        /"viewCount"\s*:\s*\{\s*"videoViewCountRenderer"\s*:\s*\{\s*"viewCount"\s*:\s*\{\s*"runs"\s*:\s*\[\s*\{\s*"text"\s*:\s*"([^"]+)"/);
+    if (viewersText) {
+      live = true;
+    } else if (live) {
+      viewersText = firstMatch(body, /"originalViewCount"\s*:\s*"(\d+)"/)
+          || firstMatch(body, /"viewCount"\s*:\s*\{[\s\S]{0,420}?"simpleText"\s*:\s*"([^"]+)"/)
+          || firstMatch(body, /"shortViewCountText"\s*:\s*\{[\s\S]{0,320}?"(?:simpleText|text)"\s*:\s*"([^"]+)"/);
+    } else {
+      viewersText = firstMatch(body, /"viewCount"\s*:\s*\{[\s\S]{0,420}?"simpleText"\s*:\s*"([^"]+)"/);
+      if (viewersText) live = true;
+    }
     if (!live) return { live: false };
     return { live: true, viewers: viewersText ? Math.max(0, humanNumber(viewersText)) : 0,
              title: jsonUnescape(firstMatch(body, /"videoDetails"\s*:\s*\{[\s\S]{0,600}?"title"\s*:\s*"((?:\\.|[^"\\])*)"/) || "") };
   }
   if (key === "tt") {
-    if (!/"roomId"\s*:\s*"(\d+)"/.test(body)) return { live: false };
+    /* Профильный roomId сохраняется после эфира, поэтому признак эфира —
+       активная комната: roomInfo-объект, liveRoom со status 2 или viewerCount
+       (ФТ-2.4). Зрителей в HTML может не быть — тогда 0 (деградация). */
     const viewers = firstMatch(body, /"viewerCount"\s*:\s*(\d+)/);
+    const live = /"roomInfo"\s*:\s*\{/.test(body)
+        || /"liveRoom"\s*:\s*\{[\s\S]{0,500}?"status"\s*:\s*2\s*[,\}]/.test(body)
+        || !!viewers
+        || (/"roomId"\s*:\s*"(\d+)"/.test(body) && !/"roomInfo"\s*:\s*null/.test(body));
+    if (!live) return { live: false };
     return { live: true, viewers: viewers ? +viewers : 0,
-             title: jsonUnescape(firstMatch(body, /"title"\s*:\s*"((?:\\.|[^"\\])*)"/) || "") };
+             title: jsonUnescape(firstMatch(body, /"liveRoom"\s*:\s*\{[\s\S]{0,600}?"title"\s*:\s*"((?:\\.|[^"\\])*)"/)
+                    || firstMatch(body, /"title"\s*:\s*"((?:\\.|[^"\\])*)"/) || "") };
   }
   if (key === "kc") {
     const live = /"livestream"\s*:\s*\{/.test(body) || /"is_live"\s*:\s*true/.test(body);
@@ -511,12 +536,22 @@ function parseResponse(key, body) {
                     || firstMatch(body, /"title"\s*:\s*"((?:\\.|[^"\\])*)"/) || "") };
   }
   if (key === "gg") {
-    if (!/"status"\s*:\s*"[Ll]ive"/.test(body)) return { live: false };
+    /* Эфир — status "live" | true | 1; офлайн — false | 0; канал без данных —
+       ошибка. Зрители: viewers | viewer_count | count (ФТ-2.6). */
     const viewers = firstMatch(body, /"viewers"\s*:\s*"?(\d+)"?/)
         || firstMatch(body, /"viewer_count"\s*:\s*"?(\d+)"?/)
         || firstMatch(body, /"count"\s*:\s*"?(\d+)"?/);
+    let live = /"status"\s*:\s*"[Ll]ive"/.test(body) || /"status"\s*:\s*true/.test(body)
+        || /"status"\s*:\s*1\s*[,\}\]]/.test(body);
+    if (!live) {
+      const offline = /"status"\s*:\s*false/.test(body) || /"status"\s*:\s*0\s*[,\}\]]/.test(body);
+      if (!offline && viewers && +viewers > 0) live = true;
+      else if (!offline && !viewers) return { live: false, error: "channel not found" };
+      else return { live: false };
+    }
     return { live: true, viewers: viewers ? +viewers : 0,
-             title: jsonUnescape(firstMatch(body, /"title"\s*:\s*"((?:\\.|[^"\\])*)"/) || "") };
+             title: jsonUnescape(firstMatch(body, /channel\s*:\s*\{[\s\S]{0,120}?"title"\s*:\s*"((?:\\.|[^"\\])*)"/)
+                    || firstMatch(body, /"title"\s*:\s*"((?:\\.|[^"\\])*)"/) || "") };
   }
   return { live: false };
 }

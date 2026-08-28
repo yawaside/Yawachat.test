@@ -31,6 +31,9 @@ struct PlatformSettings {
 };
 
 struct AppConfig {
+    // ФТ-5.10: VK/Twitch/YouTube включены по умолчанию.
+    AppConfig();
+
     int pollIntervalSec = 15;
     bool showStreamTitle = true;
     bool autoStartPolling = true;

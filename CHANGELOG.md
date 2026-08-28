@@ -42,3 +42,17 @@
   (реестр, Program Files, %LOCALAPPDATA%).
 - CI: проверки `lint-cmake`, `lint-version`, `web`, `native`; автоматический
   тег `vX.Y.Z` и релиз при пуше в `main`.
+
+### Fixed
+
+- Парсеры приведены к реальной разметке площадок (проверено на сохранённых
+  ответах 2026 г.): YouTube — счётчик зрителей из `videoViewCountRenderer.runs`
+  и `originalViewCount` (прежние `simpleText`/`shortViewCountText` — резерв;
+  `videoDetails.viewCount` — суммарные просмотры, не зрители); GoodGame —
+  признаки эфира `status: true|1` и офлайна `false|0` (строковый `"live"` —
+  резерв), заголовок стрима из блока `channel:{…}`; TikTok — эфир только при
+  активной комнате (`roomInfo`-объект, `liveRoom` со `status: 2`,
+  `viewerCount`), поскольку профильный `roomId` сохраняется и после эфира.
+- Виджет в демо-режиме без заданных каналов показывает все 6 площадок,
+  а не пустую заглушку.
+- По умолчанию включены VK, Twitch и YouTube (ФТ-5.10).

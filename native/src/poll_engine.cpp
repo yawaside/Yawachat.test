@@ -229,23 +229,53 @@ ParseResult parseResponse(PlatformId id, const QString& body, long long* viewers
     }
 
     if (id == PlatformId::YouTube) {
-        // viewCount.simpleText | shortViewCountText (ФТ-2.3)
+        // Зрители (по убыванию приоритета, ФТ-2.3):
+        //  1) viewCount.videoViewCountRenderer.viewCount.runs — актуальная разметка live-страниц
+        //     ("viewCount":{"videoViewCountRenderer":{"viewCount":{"runs":[{"text":"18,719"}...
+        //  2) originalViewCount внутри того же блока ("originalViewCount":"18719")
+        //  3) viewCount.simpleText — прежняя разметка ("18,719 watching now")
+        //  4) shortViewCountText — резерв ("18K watching")
+        // Внимание: videoDetails.viewCount — суммарные просмотры видео, НЕ зрители.
+        static const R reRuns(QStringLiteral(R"YM("viewCount"\s*:\s*\{\s*"videoViewCountRenderer"\s*:\s*\{\s*"viewCount"\s*:\s*\{\s*"runs"\s*:\s*\[\s*\{\s*"text"\s*:\s*"([^"]+)")YM"));
+        static const R reOriginal(QStringLiteral(R"YM("originalViewCount"\s*:\s*"(\d+)")YM"));
         static const R reViewCount(QStringLiteral(R"YM("viewCount"\s*:\s*\{[\s\S]{0,420}?"simpleText"\s*:\s*"([^"]+)")YM"));
         static const R reShortViewCount(QStringLiteral(R"YM("shortViewCountText"\s*:\s*\{[\s\S]{0,320}?"(?:simpleText|text)"\s*:\s*"([^"]+)")YM"));
         static const R reIsLive(QStringLiteral(R"YM("isLive"\s*:\s*true)YM"));
+        static const R reLiveNow(QStringLiteral(R"YM("liveBroadcastDetails"\s*:\s*\{[\s\S]{0,240}?"isLiveNow"\s*:\s*true)YM"));
         static const R reTitle(QStringLiteral(R"YM("videoDetails"\s*:\s*\{[\s\S]{0,600}?"title"\s*:\s*"((?:\\.|[^"\\])*)")YM"));
         static const R reTitleFallback(QStringLiteral(R"YM("title"\s*:\s*"((?:\\.|[^"\\])*)")YM"));
 
+        bool live = reIsLive.match(body).hasMatch() || reLiveNow.match(body).hasMatch();
         QString viewersText;
-        const QRegularExpressionMatch vc = reViewCount.match(body);
-        bool live = reIsLive.match(body).hasMatch();
-        if (vc.hasMatch()) {
-            viewersText = vc.captured(1);
+        const QRegularExpressionMatch runs = reRuns.match(body);
+        if (runs.hasMatch()) {
+            // Блок videoViewCountRenderer встречается только на live-страницах.
+            viewersText = runs.captured(1);
             live = true;
+        } else if (live) {
+            // originalViewCount берём лишь при подтверждённом эфире: на страницах
+            // обычных видео это суммарное число просмотров.
+            const QRegularExpressionMatch orig = reOriginal.match(body);
+            if (orig.hasMatch()) {
+                viewersText = orig.captured(1);
+            } else {
+                const QRegularExpressionMatch vc = reViewCount.match(body);
+                if (vc.hasMatch()) {
+                    viewersText = vc.captured(1);
+                    live = true;
+                } else {
+                    const QRegularExpressionMatch svc = reShortViewCount.match(body);
+                    if (svc.hasMatch())
+                        viewersText = svc.captured(1);
+                }
+            }
         } else {
-            const QRegularExpressionMatch svc = reShortViewCount.match(body);
-            if (svc.hasMatch())
-                viewersText = svc.captured(1);
+            // Прежняя разметка: viewCount.simpleText сама является признаком эфира.
+            const QRegularExpressionMatch vc = reViewCount.match(body);
+            if (vc.hasMatch()) {
+                viewersText = vc.captured(1);
+                live = true;
+            }
         }
         *title = matchString(body, reTitle);
         if (title->isEmpty())
@@ -258,16 +288,32 @@ ParseResult parseResponse(PlatformId id, const QString& body, long long* viewers
     }
 
     if (id == PlatformId::TikTok) {
-        // Признак эфира — наличие roomId (ФТ-2.4)
+        // Признак эфира — активная комната (ФТ-2.4). Профильный roomId сохраняется
+        // и после окончания эфира, поэтому голого наличия roomId недостаточно:
+        //  • "roomInfo":{...} в CurrentRoom — страница открытой комнаты;
+        //  • liveRoom со status 2 — активный эфир в данных профиля;
+        //  • viewerCount — счётчик зрителей активной комнаты.
+        // Для прежней разметки (без CurrentRoom) резерв — roomId при отсутствии
+        // явного маркера пустой комнаты ("roomInfo":null).
+        // Зрители: HTML-страница может не содержать viewerCount — тогда 0 (деградация).
         static const R reRoom(QStringLiteral(R"YM("roomId"\s*:\s*"(\d+)")YM"));
+        static const R reRoomInfo(QStringLiteral(R"YM("roomInfo"\s*:\s*\{)YM"));
+        static const R reRoomInfoNull(QStringLiteral(R"YM("roomInfo"\s*:\s*null)YM"));
+        static const R reLiveRoomActive(QStringLiteral(R"YM("liveRoom"\s*:\s*\{[\s\S]{0,500}?"status"\s*:\s*2\s*[,\}])YM"));
         static const R reViewers(QStringLiteral(R"YM("viewerCount"\s*:\s*(\d+))YM"));
+        static const R reLiveRoomTitle(QStringLiteral(R"YM("liveRoom"\s*:\s*\{[\s\S]{0,600}?"title"\s*:\s*"((?:\\.|[^"\\])*)")YM"));
         static const R reTitle(QStringLiteral(R"YM("title"\s*:\s*"((?:\\.|[^"\\])*)")YM"));
-        if (!reRoom.match(body).hasMatch())
-            return ParseResult::Offline;
         bool hasViewers = false;
         const long long value = matchNumber(body, reViewers, &hasViewers);
+        const bool hasRoom = reRoom.match(body).hasMatch();
+        const bool live = reRoomInfo.match(body).hasMatch() || reLiveRoomActive.match(body).hasMatch()
+            || hasViewers || (hasRoom && !reRoomInfoNull.match(body).hasMatch());
+        if (!live)
+            return ParseResult::Offline;
         *viewers = hasViewers ? value : 0;
-        *title = matchString(body, reTitle);
+        *title = matchString(body, reLiveRoomTitle);
+        if (title->isEmpty())
+            *title = matchString(body, reTitle);
         return ParseResult::Live;
     }
 
@@ -290,23 +336,45 @@ ParseResult parseResponse(PlatformId id, const QString& body, long long* viewers
         return ParseResult::Live;
     }
 
-    // GoodGame: "status":"live", зрители viewers | viewer_count | count (ФТ-2.6)
+    // GoodGame: эфир — status "live" | true | 1, офлайн — false | 0; зрители viewers |
+    // viewer_count | count (ФТ-2.6). Канал без данных (страница-заглушка) — ошибка.
     {
-        static const R reLive(QStringLiteral(R"YM("status"\s*:\s*"[Ll]ive")YM"));
+        static const R reLiveStr(QStringLiteral(R"YM("status"\s*:\s*"[Ll]ive")YM"));
+        static const R reLiveTrue(QStringLiteral(R"YM("status"\s*:\s*true)YM"));
+        static const R reLiveOne(QStringLiteral(R"YM("status"\s*:\s*1\s*[,\}\]])YM"));
+        static const R reOfflineFalse(QStringLiteral(R"YM("status"\s*:\s*false)YM"));
+        static const R reOfflineZero(QStringLiteral(R"YM("status"\s*:\s*0\s*[,\}\]])YM"));
         static const R reViewers(QStringLiteral(R"YM("viewers"\s*:\s*"?(\d+)"?)YM"));
         static const R reViewersAlt(QStringLiteral(R"YM("viewer_count"\s*:\s*"?(\d+)"?)YM"));
         static const R reViewersAlt2(QStringLiteral(R"YM("count"\s*:\s*"?(\d+)"?)YM"));
+        // Заголовок стрима — поле title в блоке channel:{...}; первый попавшийся
+        // title на странице — название игры.
+        static const R reChannelTitle(QStringLiteral(R"YM(channel\s*:\s*\{[\s\S]{0,120}?"title"\s*:\s*"((?:\\.|[^"\\])*)")YM"));
         static const R reTitle(QStringLiteral(R"YM("title"\s*:\s*"((?:\\.|[^"\\])*)")YM"));
-        if (!reLive.match(body).hasMatch())
-            return ParseResult::Offline;
         bool hasViewers = false;
         long long value = matchNumber(body, reViewers, &hasViewers);
         if (!hasViewers)
             value = matchNumber(body, reViewersAlt, &hasViewers);
         if (!hasViewers)
             value = matchNumber(body, reViewersAlt2, &hasViewers);
+        bool live = reLiveStr.match(body).hasMatch() || reLiveTrue.match(body).hasMatch()
+            || reLiveOne.match(body).hasMatch();
+        if (!live) {
+            const bool offline = reOfflineFalse.match(body).hasMatch() || reOfflineZero.match(body).hasMatch();
+            if (!offline && hasViewers && value > 0) {
+                // Статус не распознан, но зрители есть — трактуем как эфир.
+                live = true;
+            } else if (!offline && !hasViewers) {
+                *errorDetail = ymtr(QStringLiteral("Test.Fail.NotFound"));
+                return ParseResult::Error;
+            } else {
+                return ParseResult::Offline;
+            }
+        }
         *viewers = hasViewers ? value : 0;
-        *title = matchString(body, reTitle);
+        *title = matchString(body, reChannelTitle);
+        if (title->isEmpty())
+            *title = matchString(body, reTitle);
         return ParseResult::Live;
     }
 }
@@ -726,5 +794,31 @@ void PollEngine::testPlatform(PlatformId id)
 
     sendRequest(id, true);
 }
+
+// ---------------------------------------------------------------------------
+// Хуки для модульных тестов парсеров. Компилируются только при
+// -DYAWAMETRICS_TEST_HOOKS и не попадают в релизную сборку.
+// ---------------------------------------------------------------------------
+#ifdef YAWAMETRICS_TEST_HOOKS
+namespace test_hooks {
+
+int parseForTest(PlatformId id, const QString& body, long long* viewers, QString* title, QString* error)
+{
+    // 0 = Live, 1 = Offline, 2 = Error
+    return static_cast<int>(parseResponse(id, body, viewers, title, error));
+}
+
+long long parseHumanNumberForTest(const QString& text)
+{
+    return parseHumanNumber(text);
+}
+
+QString jsonUnescapeForTest(const QString& text)
+{
+    return jsonUnescape(text);
+}
+
+} // namespace test_hooks
+#endif
 
 } // namespace yawametrics
