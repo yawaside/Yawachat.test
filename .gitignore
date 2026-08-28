@@ -1,0 +1,18 @@
+# зависимости
+node_modules/
+desktop/node_modules/
+
+# локальные сборки (exe публикуются в GitHub Releases, а не в git-историю)
+dist/
+desktop/release/
+desktop/renderer-dist/
+desktop/out/
+
+# настройки с токеном — не коммитим
+desktop/settings.json
+settings.json
+
+# служебное
+.DS_Store
+Thumbs.db
+*.log
