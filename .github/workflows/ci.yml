@@ -50,6 +50,8 @@ jobs:
           node-version: "20"
       - name: Widget structure and size
         run: node .github/scripts/check-widget.mjs
+      - name: Widget parser behavior
+        run: node .github/scripts/check-widget-parse.mjs
       - name: Artifact size guard
         run: |
           bytes=$(wc -c < native/data/widget.html)

@@ -40,8 +40,9 @@
 - Тёмная тема `yawametrics.qss` и локализация ru-RU / en-US.
 - ZIP-комплект ручной установки и установщик Inno Setup с автопоиском OBS
   (реестр, Program Files, %LOCALAPPDATA%).
-- CI: проверки `lint-cmake`, `lint-version`, `web`, `native`; автоматический
-  тег `vX.Y.Z` и релиз при пуше в `main`.
+- CI: проверки `lint-cmake`, `lint-version`, `web` (структура виджета + поведение
+  парсера на синтетических ответах), `native`; автоматический тег `vX.Y.Z` и
+  релиз при пуше в `main`.
 
 ### Fixed
 
