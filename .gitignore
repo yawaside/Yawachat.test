@@ -1,0 +1,18 @@
+# зависимости
+node_modules/
+desktop/node_modules/
+
+# сборки
+dist/
+desktop/release/
+desktop/renderer-dist/
+desktop/out/
+
+# настройки с токеном — не коммитим
+desktop/settings.json
+settings.json
+
+# служебное
+.DS_Store
+Thumbs.db
+*.log

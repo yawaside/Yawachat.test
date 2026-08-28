@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <title>YawaChatHub — OBS widget</title>
+    <style>
+      :root { color-scheme: dark; }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; }
+      body {
+        font-family: "Onest", "Segoe UI", system-ui, sans-serif;
+        padding: 10px;
+        display: flex;
+        flex-direction: column;
+        justify-content: flex-end;
+        gap: 6px;
+      }
+      #stack { display: flex; flex-direction: column; gap: 6px; }
+      .msg {
+        padding: 8px 10px;
+        border-radius: var(--r, 12px);
+        background: var(--bg, rgba(10, 11, 18, 0.7));
+        border: 1px solid var(--border, rgba(255, 255, 255, 0.1));
+        box-shadow: var(--shadow, none);
+        animation: pop 0.22s ease-out;
+        word-break: break-word;
+      }
+      .msg .who { font-weight: 700; margin-right: 6px; }
+      .msg .time { font-family: ui-monospace, Consolas, monospace; font-size: 0.75em; opacity: 0.55; margin-right: 6px; }
+      .msg .plat {
+        display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+        margin-right: 6px; vertical-align: middle;
+      }
+      .msg.fade { opacity: 0; transform: translateY(-6px); transition: all 0.35s ease; }
+      @keyframes pop { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+      #hint {
+        font-family: ui-monospace, Consolas, monospace; font-size: 11px;
+        opacity: 0.6; color: #9aa1b5;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="stack"></div>
+    <div id="hint">ожидание сообщений…</div>
+
+    <script>
+      // Виджет получает все настройки через query-строку — отдельного конфига нет.
+      const q = new URLSearchParams(location.search);
+      const token = q.get("token") || "";
+      const port = q.get("port") || location.port || "47823";
+      const theme = q.get("theme") || "minimal-dark";
+      const fontSize = parseInt(q.get("fs") || "16", 10);
+      const bgOpacity = parseInt(q.get("bg") || "70", 10);
+      const radius = parseInt(q.get("r") || "12", 10);
+      const ttl = parseInt(q.get("ttl") || "8", 10);
+      const dir = q.get("dir") || "up";
+      const shadow = q.get("shadow") === "1";
+      const showPlatform = q.get("plat") === "1";
+      const showTime = q.get("time") === "1";
+      const maxMessages = parseInt(q.get("max") || "8", 10);
+
+      const THEMES = {
+        "minimal-dark":  { bg: "10, 11, 18",    text: "#f2f3f8", name: "#a78bfa", sub: "rgba(242,243,248,0.45)", border: "rgba(255,255,255,0.10)", shadow: "0 2px 14px rgba(0,0,0,0.35)" },
+        "minimal-light": { bg: "248, 249, 252", text: "#171a26", name: "#7c3aed", sub: "rgba(23,26,38,0.5)",     border: "rgba(23,26,38,0.10)",   shadow: "0 2px 14px rgba(23,26,38,0.14)" },
+        neon:            { bg: "6, 8, 16",      text: "#e8fdff", name: "#22d3ee", sub: "rgba(232,253,255,0.5)",  border: "rgba(34,211,238,0.35)", shadow: "0 0 18px rgba(34,211,238,0.28)" },
+        obsidian:        { bg: "5, 6, 12",      text: "#f5f7fb", name: "#c4b5fd", sub: "rgba(245,247,251,0.42)", border: "rgba(167,139,250,0.22)", shadow: "0 10px 34px rgba(0,0,0,0.42)" },
+        terminal:        { bg: "2, 10, 8",      text: "#d1fae5", name: "#34d399", sub: "rgba(209,250,229,0.45)", border: "rgba(52,211,153,0.26)", shadow: "0 0 18px rgba(52,211,153,0.16)" },
+        sunset:          { bg: "24, 10, 20",    text: "#fff7ed", name: "#fb923c", sub: "rgba(255,247,237,0.45)", border: "rgba(251,146,60,0.25)", shadow: "0 8px 28px rgba(251,113,133,0.18)" },
+        frost:           { bg: "226, 239, 255", text: "#0f172a", name: "#2563eb", sub: "rgba(15,23,42,0.45)",    border: "rgba(37,99,235,0.20)",  shadow: "0 8px 28px rgba(15,23,42,0.12)" },
+        amoled:          { bg: "0, 0, 0",       text: "#f3f4f6", name: "#a78bfa", sub: "rgba(243,244,246,0.45)", border: "rgba(255,255,255,0.14)", shadow: "none" },
+        latte:           { bg: "252, 247, 240", text: "#3f3a37", name: "#b45309", sub: "rgba(63,58,55,0.45)",    border: "rgba(180,83,9,0.2)",    shadow: "0 8px 24px rgba(63,58,55,0.14)" },
+      };
+      const PLAT = {
+        twitch: "#a970ff", youtube: "#ff4e45", vk: "#4c8dff", kick: "#53fc18", tiktok: "#ff3b5c",
+      };
+
+      const t = THEMES[theme] || THEMES["minimal-dark"];
+      const root = document.documentElement;
+      root.style.setProperty("--bg", "rgba(" + t.bg + ", " + bgOpacity / 100 + ")");
+      root.style.setProperty("--border", t.border);
+      root.style.setProperty("--shadow", shadow ? t.shadow : "none");
+      root.style.setProperty("--r", radius + "px");
+      if (dir === "down") document.body.style.justifyContent = "flex-start";
+
+      const stack = document.getElementById("stack");
+      const hint = document.getElementById("hint");
+
+      function addMessage(m) {
+        if (!m || !m.text) return;
+        hint.style.display = "none";
+        const el = document.createElement("div");
+        el.className = "msg";
+
+        const line = document.createElement("div");
+        line.style.fontSize = fontSize + "px";
+        line.style.color = t.text;
+
+        if (showPlatform) {
+          const dot = document.createElement("span");
+          dot.className = "plat";
+          dot.style.background = PLAT[m.platform] || "#a78bfa";
+          line.appendChild(dot);
+        }
+        if (showTime) {
+          const time = document.createElement("span");
+          time.className = "time";
+          const d = new Date(m.ts || Date.now());
+          time.textContent = String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
+          line.appendChild(time);
+        }
+        const who = document.createElement("span");
+        who.className = "who";
+        who.style.color = m.color || t.name;
+        who.textContent = m.author || "зритель";
+        line.appendChild(who);
+
+        const text = document.createElement("span");
+        text.textContent = m.text;
+        line.appendChild(text);
+
+        el.appendChild(line);
+        if (dir === "down") stack.appendChild(el);
+        else stack.insertBefore(el, stack.firstChild);
+
+        while (stack.children.length > maxMessages) {
+          stack.removeChild(dir === "down" ? stack.firstChild : stack.lastChild);
+        }
+        if (ttl > 0) {
+          setTimeout(() => {
+            el.classList.add("fade");
+            setTimeout(() => el.remove(), 400);
+          }, ttl * 1000);
+        }
+      }
+
+      function connect() {
+        const ws = new WebSocket("ws://127.0.0.1:" + port + "/ws?token=" + encodeURIComponent(token));
+        ws.onmessage = (ev) => {
+          try {
+            const data = JSON.parse(ev.data);
+            if (data.type === "chat") addMessage(data.msg);
+          } catch { /* noop */ }
+        };
+        ws.onclose = () => {
+          hint.style.display = "block";
+          hint.textContent = "нет соединения — переподключение…";
+          setTimeout(connect, 3000);
+        };
+        ws.onerror = () => ws.close();
+      }
+      connect();
+    </script>
+  </body>
+</html>
