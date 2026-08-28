@@ -107,7 +107,11 @@ add_custom_command(TARGET yawametrics POST_BUILD
     COMMENT "Assembling YawaMetrics runtime layout"
 )
 
+# MODULE-таргет: DLL-артефакт тянется через RUNTIME, но CMake требует
+# LIBRARY DESTINATION для module-целей при установке (как и шаблон
+# obs-plugintemplate). Указываем оба — поведение одинаково на всех платформах.
 install(TARGETS yawametrics
+    LIBRARY DESTINATION "obs-plugins/64bit"
     RUNTIME DESTINATION "obs-plugins/64bit"
 )
 install(FILES

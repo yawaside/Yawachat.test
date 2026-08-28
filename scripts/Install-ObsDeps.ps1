@@ -476,10 +476,12 @@ function New-PathsManifest {
     )
     # Строковая сборка (не Join-Path): генератор не зависит от файловой
     # системы и тестируется на любой платформе.
+    # Фронтенд-заголовок лежит в UI/obs-frontend-api/obs-frontend-api.h,
+    # поэтому include-путь указывает на UI/obs-frontend-api.
     $base = (($ObsSourceDir -replace '\\', '/').TrimEnd('/'))
     $qtFwd = ($QtDir -replace '\\', '/')
     $libobsFwd = ($base + '/libobs')
-    $frontendFwd = ($base + '/UI')
+    $frontendFwd = ($base + '/UI/obs-frontend-api')
     $importFwd = ($ImportLibDir -replace '\\', '/')
 
     $manifest = @"

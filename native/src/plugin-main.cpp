@@ -25,7 +25,7 @@ QPointer<DockPanel> g_panel;
 
 } // namespace
 
-MODULE_EXPORTED extern "C" bool obs_module_load(void)
+MODULE_EXPORT bool obs_module_load(void)
 {
     // Переводы: data/locale/<locale>.ini, ru-RU — основной (ФТ-8.2).
     loadStrings();
@@ -44,7 +44,7 @@ MODULE_EXPORTED extern "C" bool obs_module_load(void)
     return true;
 }
 
-MODULE_EXPORTED extern "C" void obs_module_unload(void)
+MODULE_EXPORT void obs_module_unload(void)
 {
     // НФТ-4: остановить таймеры/опрос; сам виджет удаляет OBS.
     if (g_panel)
