@@ -1,0 +1,24 @@
+{
+  "name": "YawaMetricks.OBS.plugin",
+  "version": "2.1.1",
+  "displayName": "YawaMetrics for OBS Studio",
+  "description": "Repository umbrella spec: native dock panel + browser widget + installer + CI",
+  "license": "GPL-2.0-or-later",
+  "products": [
+    {
+      "name": "yawametrics.dll",
+      "path": "native/",
+      "type": "obs-plugin-module"
+    },
+    {
+      "name": "widget.html",
+      "path": "native/data/widget.html",
+      "type": "browser-source-overlay"
+    }
+  ],
+  "dependencies": {
+    "obs-studio": "29.1.3",
+    "obs-deps": "2026-08-26",
+    "qt6": "2026-08-26"
+  }
+}

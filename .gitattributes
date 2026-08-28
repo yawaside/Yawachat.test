@@ -1,0 +1,19 @@
+# Нормализация переводов строк; артефакты — бинарные.
+* text=auto
+*.ps1 text
+*.cpp text
+*.hpp text
+*.qss text
+*.ini text
+*.html text
+*.md text
+*.json text
+*.yml text
+*.iss text
+*.txt text
+*.mjs text
+*.py text
+*.dll binary
+*.lib binary
+*.zip binary
+*.png binary

@@ -1,0 +1,321 @@
+/* YawaMetrics — тема интерфейса (§6.1).
+   Палитра:
+     void    #06060b   фон изделия
+     panel   #0d0d16   карточки, панели настроек
+     panel-2 #121222   шапка, вложенные блоки
+     line    rgba(255,255,255,.08)
+     accent  #8b5cf6
+     accent-2 #d946ef
+     live    #22c55e
+     error   #f43f5e
+     text    #e7e7ef
+     muted   #8b91a8
+*/
+
+#YawaRoot {
+    background: #06060b;
+    font-family: "Inter", "Segoe UI", "SF Pro Text", "Roboto", "Arial";
+    color: #e7e7ef;
+}
+
+/* ---------- Шапка ---------- */
+
+#HeaderBar {
+    background: #121222;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+#HeaderTitle {
+    color: #e7e7ef;
+    font-size: 13px;
+    font-weight: 700;
+    background: transparent;
+    border: none;
+}
+
+#HeaderVersion {
+    color: #565b6e;
+    font-size: 10px;
+    font-weight: 600;
+    background: transparent;
+    border: none;
+}
+
+#HeaderButton {
+    background: #121222;
+    color: #e7e7ef;
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    border-radius: 6px;
+    padding: 4px 10px;
+    font-size: 11px;
+    font-weight: 600;
+}
+#HeaderButton:hover {
+    background: #1a1a2e;
+    border-color: rgba(139, 92, 246, 0.55);
+}
+#HeaderButton:checked {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                stop:0 #8b5cf6, stop:1 #d946ef);
+    color: #ffffff;
+    border-color: transparent;
+}
+
+/* ---------- Карточки ---------- */
+
+QFrame#QuickCard {
+    background: #0d0d16;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 10px;
+}
+QFrame#QuickCard:hover {
+    border-color: rgba(139, 92, 246, 0.45);
+    background: #10101d;
+}
+
+QFrame#TotalCard {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                stop:0 #8b5cf6, stop:1 #d946ef);
+    border-radius: 12px;
+}
+
+QFrame#CompactSummary {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                stop:0 #8b5cf6, stop:1 #d946ef);
+    border-radius: 10px;
+}
+
+QWidget#CompactTile {
+    background: #0d0d16;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+}
+QWidget#CompactTile:hover {
+    border-color: rgba(139, 92, 246, 0.45);
+}
+
+/* ---------- Настройки ---------- */
+
+QFrame#SettingsPanel {
+    background: #0d0d16;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 10px;
+}
+
+QLabel {
+    color: #e7e7ef;
+    background: transparent;
+    border: none;
+}
+
+#HintLabel {
+    color: #8b91a8;
+    font-size: 11px;
+}
+
+QPushButton {
+    background: #121222;
+    color: #e7e7ef;
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    border-radius: 6px;
+    padding: 6px 12px;
+    font-size: 12px;
+    font-weight: 600;
+}
+QPushButton:hover {
+    background: #1a1a2e;
+    border-color: rgba(139, 92, 246, 0.55);
+}
+QPushButton:pressed {
+    background: #16162a;
+}
+
+QPushButton#PrimaryButton {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                stop:0 #8b5cf6, stop:1 #d946ef);
+    color: #ffffff;
+    border: none;
+}
+QPushButton#PrimaryButton:hover {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                stop:0 #9d75f8, stop:1 #e35df2);
+}
+
+QPushButton#SecondaryButton {
+    background: transparent;
+    color: #8b91a8;
+    border: 1px dashed rgba(255, 255, 255, 0.16);
+}
+QPushButton#SecondaryButton:hover {
+    color: #e7e7ef;
+    border-color: rgba(139, 92, 246, 0.55);
+}
+QPushButton#SecondaryButton:checked {
+    color: #e7e7ef;
+    border-style: solid;
+    border-color: rgba(139, 92, 246, 0.45);
+}
+
+QToolButton#PlatformButton {
+    background: #0d0d16;
+    color: #8b91a8;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    padding: 4px;
+    font-size: 10px;
+    font-weight: 700;
+}
+QToolButton#PlatformButton:hover {
+    border-color: rgba(139, 92, 246, 0.45);
+    color: #e7e7ef;
+}
+QToolButton#PlatformButton:checked {
+    background: #17122a;
+    color: #e7e7ef;
+    border-color: #8b5cf6;
+}
+
+/* ---------- Поля ввода ---------- */
+
+QLineEdit {
+    background: #121222;
+    color: #e7e7ef;
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    border-radius: 6px;
+    padding: 5px 8px;
+    font-size: 12px;
+    selection-background-color: #8b5cf6;
+}
+QLineEdit:focus {
+    border-color: #8b5cf6;
+}
+QLineEdit:disabled {
+    color: #565b6e;
+}
+
+QComboBox {
+    background: #121222;
+    color: #e7e7ef;
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    border-radius: 6px;
+    padding: 5px 10px;
+    font-size: 12px;
+}
+QComboBox:hover {
+    border-color: rgba(139, 92, 246, 0.55);
+}
+QComboBox:focus {
+    border-color: #8b5cf6;
+}
+QComboBox::drop-down {
+    border: none;
+    width: 18px;
+}
+QComboBox::down-arrow {
+    image: none;
+    border-left: 4px solid transparent;
+    border-right: 4px solid transparent;
+    border-top: 5px solid #8b91a8;
+    margin-right: 6px;
+}
+QComboBox QAbstractItemView {
+    background: #121222;
+    color: #e7e7ef;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    selection-background-color: #8b5cf6;
+    selection-color: #ffffff;
+    outline: none;
+}
+
+QSlider::groove:horizontal {
+    height: 4px;
+    background: rgba(255, 255, 255, 0.10);
+    border-radius: 2px;
+}
+QSlider::sub-page:horizontal {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                stop:0 #8b5cf6, stop:1 #d946ef);
+    border-radius: 2px;
+}
+QSlider::handle:horizontal {
+    background: #e7e7ef;
+    width: 14px;
+    height: 14px;
+    margin: -5px 0;
+    border-radius: 7px;
+}
+QSlider::handle:horizontal:hover {
+    background: #ffffff;
+}
+
+/* ---------- Вкладки ---------- */
+
+QTabWidget::pane {
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    top: -1px;
+    background: #090911;
+}
+QTabBar::tab {
+    background: #121222;
+    color: #8b91a8;
+    padding: 6px 14px;
+    margin-right: 3px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-bottom: none;
+    border-top-left-radius: 8px;
+    border-top-right-radius: 8px;
+    font-size: 11px;
+    font-weight: 700;
+}
+QTabBar::tab:selected {
+    color: #e7e7ef;
+    background: #090911;
+    border-color: rgba(139, 92, 246, 0.55);
+}
+QTabBar::tab:hover:!selected {
+    color: #e7e7ef;
+}
+
+/* ---------- Скролл (ФТ-1.6) ---------- */
+
+QScrollArea#YawaScroll {
+    background: transparent;
+    border: none;
+}
+QScrollArea#YawaScroll > QWidget > QWidget {
+    background: transparent;
+}
+
+QScrollBar:vertical {
+    background: transparent;
+    width: 8px;
+    margin: 2px;
+}
+QScrollBar::handle:vertical {
+    background: rgba(255, 255, 255, 0.14);
+    border-radius: 3px;
+    min-height: 24px;
+}
+QScrollBar::handle:vertical:hover {
+    background: rgba(139, 92, 246, 0.6);
+}
+QScrollBar::add-line:vertical,
+QScrollBar::sub-line:vertical {
+    height: 0;
+}
+QScrollBar::add-page:vertical,
+QScrollBar::sub-page:vertical {
+    background: transparent;
+}
+
+/* ---------- Подсказки ---------- */
+
+QToolTip {
+    background: #121222;
+    color: #e7e7ef;
+    border: 1px solid rgba(139, 92, 246, 0.55);
+    border-radius: 4px;
+    padding: 4px;
+    font-size: 11px;
+}

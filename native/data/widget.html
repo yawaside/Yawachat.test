@@ -1,0 +1,833 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>YawaMetrics Widget</title>
+<!--
+  YawaMetrics — виджет счётчика зрителей для OBS Browser Source (ФТ-7.1).
+  Самодостаточный файл: вся разметка, стили и логика внутри (ФТ-7.1).
+  Настройки кодируются в URL-параметрах (ФТ-7.10):
+
+    style   panel|stack|badge|cards|minimal|ticker   (ФТ-7.3)
+    accent  violet|emerald|sunset|ice|mono           (ФТ-7.4)
+    bg      0..100    прозрачность подложки, %        (ФТ-7.5)
+    radius  0..32     скругление углов, px            (ФТ-7.6)
+    scale   75..160   масштаб, %                      (ФТ-7.7)
+    blur    0|1       размытие фона                   (ФТ-7.8)
+    tiles   0|1       плитки площадок                 (ФТ-7.9)
+    total   0|1       всего зрителей
+    names   0|1       подписи названий
+    title   0|1       название стрима
+    anim    0|1       анимация
+    vk tw yt tt kc gg  каналы площадок
+    interval 10..120  интервал опроса, с
+    demo    0|1       демонстрационные данные
+    lang    ru|en     язык подписей
+    config  1         открыть панель настроек
+
+  Данные: Twitch и Kick отдают CORS-заголовки и опрашиваются виджетом
+  напрямую. Остальные площадки блокируют кросс-доменные запросы браузера —
+  их счётчики всегда доступны в док-панели плагина (нативный опрос).
+  Демо-режим включается автоматически, если каналы не заданы.
+-->
+<style>
+  :root {
+    --acc1: #8b5cf6;
+    --acc2: #d946ef;
+    --live: #22c55e;
+    --err:  #f43f5e;
+    --text: #e7e7ef;
+    --muted:#8b91a8;
+    --void: #06060b;
+    --radius: 12px;
+    --bg-alpha: 1;
+    --scale: 1;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body {
+    width: 100%;
+    height: 100%;
+    background: transparent;
+    overflow: hidden;
+    font-family: "Inter", "Segoe UI", "SF Pro Text", "Roboto", "Arial", sans-serif;
+    font-variant-numeric: tabular-nums;
+  }
+
+  #stage {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 8px;
+  }
+  #stage.top    { align-items: flex-start; }
+  #stage.bottom { align-items: flex-end; }
+  #stage.left   { justify-content: flex-start; }
+  #stage.right  { justify-content: flex-end; }
+
+  .widget {
+    font-size: calc(14px * var(--scale));
+    color: var(--text);
+    background: rgba(6, 6, 11, var(--bg-alpha));
+    border-radius: var(--radius);
+    backdrop-filter: blur(var(--blur, 0px));
+    -webkit-backdrop-filter: blur(var(--blur, 0px));
+    transition: background .25s ease;
+    position: relative;
+  }
+  .widget.has-frame { box-shadow: 0 0 0 1px rgba(255,255,255,.08); }
+
+  .num { font-weight: 800; letter-spacing: -0.01em; }
+  .lbl { color: var(--muted); font-weight: 600; }
+
+  .dot {
+    width: .55em; height: .55em; border-radius: 50%;
+    display: inline-block; background: #565b6e; flex: none;
+  }
+  .dot.live { background: var(--live); animation: ym-pulse 1.4s ease-in-out infinite; }
+  .dot.err  { background: var(--err); }
+
+  @keyframes ym-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(34,197,94,.55); }
+    50%      { box-shadow: 0 0 0 .45em rgba(34,197,94,0); }
+  }
+
+  .brand {
+    width: 1.35em; height: 1.35em; border-radius: .35em; flex: none;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: .55em; font-weight: 800; color: #fff; letter-spacing: .03em;
+  }
+
+  /* ---------- Панель ---------- */
+  .w-panel { display: flex; align-items: stretch; padding: .55em .85em; gap: .85em; }
+  .w-panel .total-block {
+    display: flex; flex-direction: column; justify-content: center; gap: .05em;
+    padding-right: .85em; border-right: 1px solid rgba(255,255,255,.10);
+  }
+  .w-panel .total-block .num { font-size: 1.65em; line-height: 1.05; }
+  .w-panel .total-block .lbl { font-size: .55em; text-transform: uppercase; letter-spacing: .12em; }
+  .w-panel .chips { display: flex; align-items: center; gap: .7em; }
+  .w-panel .chip {
+    display: flex; flex-direction: column; align-items: center; gap: .18em; min-width: 3.2em;
+  }
+  .w-panel .chip .row { display: flex; align-items: center; gap: .3em; }
+  .w-panel .chip .code { font-size: .55em; font-weight: 800; color: var(--muted); }
+  .w-panel .chip .num { font-size: 1.05em; }
+  .w-panel .chip .nm { font-size: .5em; color: var(--muted); max-width: 5.5em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* ---------- Стопка ---------- */
+  .w-stack { display: flex; flex-direction: column; min-width: 13em; padding: .7em .9em; gap: .12em; }
+  .w-stack .total-row {
+    display: flex; align-items: baseline; gap: .5em;
+    padding-bottom: .45em; margin-bottom: .35em;
+    border-bottom: 1px solid rgba(255,255,255,.10);
+  }
+  .w-stack .total-row .num { font-size: 1.9em; }
+  .w-stack .total-row .lbl { font-size: .6em; text-transform: uppercase; letter-spacing: .1em; }
+  .w-stack .prow { display: flex; align-items: center; gap: .55em; padding: .3em 0; }
+  .w-stack .prow .nm { font-size: .78em; font-weight: 700; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .w-stack .prow .num { font-size: 1.05em; }
+  .w-stack .stream-title {
+    font-size: .62em; color: var(--muted); white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis; padding-top: .3em;
+  }
+
+  /* ---------- Бейдж ---------- */
+  .w-badge { display: flex; align-items: center; gap: .55em; padding: .5em .95em; border-radius: 10em; }
+  .w-badge .eye { width: 1.5em; height: 1.5em; flex: none; }
+  .w-badge .num { font-size: 1.75em; line-height: 1; }
+  .w-badge .side { display: flex; flex-direction: column; line-height: 1.2; }
+  .w-badge .lbl { font-size: .55em; text-transform: uppercase; letter-spacing: .12em; }
+
+  /* ---------- Карточки ---------- */
+  .w-cards { display: grid; grid-template-columns: repeat(2, minmax(9em, 1fr)); gap: .55em; padding: .7em; }
+  .w-cards .card-total {
+    grid-column: 1 / -1; border-radius: inherit;
+    background: linear-gradient(120deg, var(--acc1), var(--acc2));
+    color: #fff; display: flex; align-items: baseline; gap: .55em;
+    padding: .55em .8em;
+  }
+  .w-cards .card-total .num { font-size: 1.75em; }
+  .w-cards .card-total .lbl { color: rgba(255,255,255,.8); font-size: .58em; text-transform: uppercase; letter-spacing: .1em; }
+  .w-cards .card {
+    background: rgba(255,255,255,.05); border-radius: .6em;
+    padding: .5em .65em; display: flex; flex-direction: column; gap: .15em;
+  }
+  .w-cards .card .head { display: flex; align-items: center; gap: .4em; }
+  .w-cards .card .nm { font-size: .62em; font-weight: 700; color: var(--muted); flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .w-cards .card .num { font-size: 1.25em; }
+  .w-cards .card .st { font-size: .55em; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  /* ---------- Минимал ---------- */
+  .w-minimal { display: flex; flex-direction: column; align-items: center; gap: .1em; padding: .25em .6em; }
+  .w-minimal .num { font-size: 3.2em; line-height: 1.05; }
+  .w-minimal .lbl { font-size: .6em; text-transform: uppercase; letter-spacing: .22em; }
+
+  /* ---------- Бегущая строка ---------- */
+  .w-ticker { width: 100%; border-radius: 0; overflow: hidden; }
+  .w-ticker .track {
+    display: flex; width: max-content; gap: 2.4em;
+    padding: .45em 0; will-change: transform;
+    animation: ym-marquee var(--ticker-dur, 22s) linear infinite;
+  }
+  .w-ticker .seg { display: flex; align-items: center; gap: 2.4em; white-space: nowrap; }
+  .w-ticker .item { display: flex; align-items: center; gap: .45em; font-size: .95em; }
+  .w-ticker .item .code { font-size: .62em; font-weight: 800; color: var(--muted); letter-spacing: .05em; }
+  .w-ticker .item.total .num { color: var(--acc2); }
+  @keyframes ym-marquee { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+
+  body.no-anim *, body.no-anim *::before, body.no-anim *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+
+  /* ---------- Панель настройки (не попадает в кадр без наведения) ---------- */
+  #configBtn {
+    position: fixed; top: 6px; right: 6px; z-index: 50;
+    width: 30px; height: 30px; border-radius: 8px; border: 1px solid rgba(255,255,255,.14);
+    background: rgba(18,18,34,.85); color: var(--muted); font-size: 15px; cursor: pointer;
+    opacity: 0; transition: opacity .2s;
+  }
+  body:hover #configBtn, body.config-open #configBtn { opacity: 1; }
+
+  #configPanel {
+    position: fixed; top: 44px; right: 6px; z-index: 50;
+    width: 300px; max-height: calc(100% - 56px); overflow: auto;
+    background: rgba(13,13,22,.97); border: 1px solid rgba(255,255,255,.12);
+    border-radius: 12px; padding: 12px; color: var(--text);
+    font-size: 11px; display: none;
+  }
+  body.config-open #configPanel { display: block; }
+
+  #configPanel h3 { font-size: 12px; margin-bottom: 8px; }
+  #configPanel .row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+  #configPanel .row label { flex: 1; color: var(--muted); }
+  #configPanel select, #configPanel input[type=text] {
+    background: #121222; color: var(--text); border: 1px solid rgba(255,255,255,.14);
+    border-radius: 6px; padding: 4px 6px; font-size: 11px; width: 130px;
+  }
+  #configPanel input[type=range] { flex: 1.2; accent-color: var(--acc1); }
+  #configPanel .val { width: 34px; text-align: right; color: var(--muted); }
+  #configPanel .chk { accent-color: var(--acc1); }
+  #configPanel button {
+    background: linear-gradient(90deg, var(--acc1), var(--acc2)); color: #fff;
+    border: none; border-radius: 6px; padding: 6px 10px; font-size: 11px;
+    font-weight: 700; cursor: pointer; margin-right: 6px; margin-top: 4px;
+  }
+  #configPanel button.ghost {
+    background: transparent; border: 1px solid rgba(255,255,255,.18); color: var(--muted);
+  }
+  #configPanel .hint { color: var(--muted); font-size: 10px; line-height: 1.45; margin-top: 8px; }
+  #configPanel .url {
+    width: 100%; margin-top: 8px; font-size: 9px; color: var(--muted);
+    background: #0a0a12; border: 1px solid rgba(255,255,255,.1); border-radius: 6px;
+    padding: 5px; word-break: break-all; max-height: 52px; overflow: auto;
+  }
+  #configPanel hr { border: none; border-top: 1px solid rgba(255,255,255,.1); margin: 10px 0; }
+</style>
+</head>
+<body>
+
+<div id="stage"><div id="widget" class="widget w-panel"></div></div>
+
+<button id="configBtn" title="Настройки виджета">⚙</button>
+
+<div id="configPanel">
+  <h3>⚙ Настройки виджета</h3>
+  <div class="row"><label>Стиль</label>
+    <select id="cStyle">
+      <option value="panel">Панель</option>
+      <option value="stack">Стопка</option>
+      <option value="badge">Бейдж</option>
+      <option value="cards">Карточки</option>
+      <option value="minimal">Минимал</option>
+      <option value="ticker">Бегущая строка</option>
+    </select></div>
+  <div class="row"><label>Акцент</label>
+    <select id="cAccent">
+      <option value="violet">Фиолетовый</option>
+      <option value="emerald">Изумрудный</option>
+      <option value="sunset">Закат</option>
+      <option value="ice">Лёд</option>
+      <option value="mono">Монохром</option>
+    </select></div>
+  <div class="row"><label>Прозрачность подложки</label>
+    <input type="range" id="cBg" min="0" max="100" step="1"><span class="val" id="cBgV"></span></div>
+  <div class="row"><label>Скругление углов</label>
+    <input type="range" id="cRadius" min="0" max="32" step="1"><span class="val" id="cRadiusV"></span></div>
+  <div class="row"><label>Масштаб</label>
+    <input type="range" id="cScale" min="75" max="160" step="1"><span class="val" id="cScaleV"></span></div>
+  <div class="row"><label>Размытие фона</label><input type="checkbox" id="cBlur" class="chk"></div>
+  <div class="row"><label>Плитки площадок</label><input type="checkbox" id="cTiles" class="chk"></div>
+  <div class="row"><label>Всего зрителей</label><input type="checkbox" id="cTotal" class="chk"></div>
+  <div class="row"><label>Подписи названий</label><input type="checkbox" id="cNames" class="chk"></div>
+  <div class="row"><label>Название стрима</label><input type="checkbox" id="cTitle" class="chk"></div>
+  <div class="row"><label>Анимация</label><input type="checkbox" id="cAnim" class="chk"></div>
+  <div class="row"><label>Демо-данные</label><input type="checkbox" id="cDemo" class="chk"></div>
+  <hr>
+  <div class="row"><label>VK Video</label><input type="text" id="chVk" placeholder="ник"></div>
+  <div class="row"><label>Twitch</label><input type="text" id="chTw" placeholder="логин"></div>
+  <div class="row"><label>YouTube</label><input type="text" id="chYt" placeholder="@handle"></div>
+  <div class="row"><label>TikTok</label><input type="text" id="chTt" placeholder="логин"></div>
+  <div class="row"><label>Kick</label><input type="text" id="chKc" placeholder="slug"></div>
+  <div class="row"><label>GoodGame</label><input type="text" id="chGg" placeholder="ник"></div>
+  <hr>
+  <button id="btnCopy">Копировать ссылку</button>
+  <button id="btnSave" class="ghost">Сохранить</button>
+  <div class="url" id="urlPreview"></div>
+  <div class="hint">Ссылка самодостаточна: вставьте её в источник «Браузер»
+    (снимите «Локальный файл»). Положение оверлея задаётся трансформацией
+    источника OBS. Twitch и Kick опрашиваются напрямую; остальные площадки
+    видны в док-панели плагина.</div>
+</div>
+
+<script>
+"use strict";
+
+/* ============================== Параметры ============================== */
+
+const STYLES   = ["panel", "stack", "badge", "cards", "minimal", "ticker"];
+const ACCENTS  = ["violet", "emerald", "sunset", "ice", "mono"];
+const ACCENT_MAP = {
+  violet:  ["#8b5cf6", "#d946ef"],
+  emerald: ["#10b981", "#34d399"],
+  sunset:  ["#f59e0b", "#ef4444"],
+  ice:     ["#38bdf8", "#818cf8"],
+  mono:    ["#e7e7ef", "#8b91a8"],
+};
+
+const PLATFORMS = {
+  vk: { name: "VK Video Live", code: "VK", color: "#2787f5",
+        url: c => "https://live.vkvideo.ru/" + encodeURIComponent(c),
+        hint: "VK" },
+  tw: { name: "Twitch", code: "TW", color: "#9146ff",
+        url: c => "https://gql.twitch.tv/gql",
+        hint: "Twitch" },
+  yt: { name: "YouTube", code: "YT", color: "#ff334b",
+        url: c => "https://www.youtube.com/@" + encodeURIComponent(c) + "/live",
+        hint: "YouTube" },
+  tt: { name: "TikTok LIVE", code: "TT", color: "#25f4ee",
+        url: c => "https://www.tiktok.com/@" + encodeURIComponent(c) + "/live",
+        hint: "TikTok" },
+  kc: { name: "Kick", code: "KC", color: "#53fc18",
+        url: c => "https://kick.com/api/v2/channels/" + encodeURIComponent(c),
+        hint: "Kick" },
+  gg: { name: "GoodGame", code: "GG", color: "#f59e0b",
+        url: c => "https://goodgame.ru/channel/" + encodeURIComponent(c),
+        hint: "GoodGame" },
+};
+const PLATFORM_KEYS = ["vk", "tw", "yt", "tt", "kc", "gg"];
+
+const DEFAULTS = {
+  style: "panel", accent: "violet", bg: 100, radius: 12, scale: 100,
+  blur: 1, tiles: 1, total: 1, names: 1, title: 0, anim: 1,
+  demo: 0, lang: "ru", interval: 15, config: 0,
+  vk: "", tw: "", yt: "", tt: "", kc: "", gg: "",
+};
+
+const L10N = {
+  ru: { viewers: "зрителей", total: "Всего", offline: "офлайн", error: "ошибка",
+        title: "Стрим", totalViewers: "Всего зрителей" },
+  en: { viewers: "viewers", total: "Total", offline: "offline", error: "error",
+        title: "Stream", totalViewers: "Total viewers" },
+};
+
+function parseParams() {
+  // Поддержка и ?a=b, и #a=b — ссылка самодостаточна в обоих видах (ФТ-7.10).
+  const raw = (location.search || "").replace(/^\?/, "") + "&" +
+              (location.hash || "").replace(/^#/, "");
+  const out = {};
+  raw.split("&").forEach(pair => {
+    if (!pair) return;
+    const idx = pair.indexOf("=");
+    const key = decodeURIComponent(idx >= 0 ? pair.slice(0, idx) : pair);
+    const value = idx >= 0 ? decodeURIComponent(pair.slice(idx + 1)) : "";
+    out[key] = value;
+  });
+  return out;
+}
+
+const PARAMS = parseParams();
+const STORE_KEY = "yawametrics-widget";
+
+function loadState() {
+  const state = Object.assign({}, DEFAULTS);
+  let stored = null;
+  try { stored = JSON.parse(localStorage.getItem(STORE_KEY) || "null"); } catch (e) { stored = null; }
+  if (stored && typeof stored === "object") {
+    for (const key of Object.keys(DEFAULTS)) {
+      if (key in stored) state[key] = stored[key];
+    }
+  }
+  // URL-параметры имеют приоритет (ссылка самодостаточна).
+  for (const key of Object.keys(DEFAULTS)) {
+    if (PARAMS[key] !== undefined && PARAMS[key] !== "") {
+      const numeric = ["bg", "radius", "scale", "blur", "tiles", "total",
+                       "names", "title", "anim", "interval", "demo", "config"];
+      state[key] = numeric.includes(key) ? parseInt(PARAMS[key], 10) : PARAMS[key];
+    } else if (PARAMS[key] === "") {
+      state[key] = PARAMS[key];
+    }
+  }
+  if (!STYLES.includes(state.style)) state.style = DEFAULTS.style;
+  if (!ACCENTS.includes(state.accent)) state.accent = DEFAULTS.accent;
+  state.bg = clamp(state.bg, 0, 100);
+  state.radius = clamp(state.radius, 0, 32);
+  state.scale = clamp(state.scale, 75, 160);
+  state.interval = clamp(state.interval || 15, 10, 120);
+  state.blur = state.blur ? 1 : 0;
+  state.demo = state.demo ? 1 : 0;
+  return state;
+}
+
+let S = loadState();
+
+function clamp(value, lo, hi) {
+  value = Number(value);
+  if (!isFinite(value)) value = lo;
+  return Math.min(hi, Math.max(lo, value));
+}
+
+function hasChannels() {
+  return PLATFORM_KEYS.some(key => String(S[key] || "").trim() !== "");
+}
+
+function isDemo() {
+  return S.demo === 1 || !hasChannels();
+}
+
+function t(key) {
+  const dict = L10N[S.lang] || L10N.ru;
+  return dict[key] || L10N.ru[key] || key;
+}
+
+function fmt(value) {
+  try {
+    return new Intl.NumberFormat(S.lang === "en" ? "en-US" : "ru-RU")
+      .format(Math.max(0, Math.round(value || 0)));
+  } catch (e) { return String(value || 0); }
+}
+
+/* ============================== Данные ============================== */
+
+const state = {};
+PLATFORM_KEYS.forEach(key => {
+  state[key] = { viewers: 0, live: false, error: false, title: "", loading: false };
+});
+
+function totalViewers() {
+  return PLATFORM_KEYS.reduce((sum, key) => {
+    return sum + ((state[key].live && enabled(key)) ? state[key].viewers : 0);
+  }, 0);
+}
+
+function enabled(key) {
+  return String(S[key] || "").trim() !== "";
+}
+
+function liveCount() {
+  return PLATFORM_KEYS.filter(key => enabled(key) && state[key].live).length;
+}
+
+/* Человекочитаемые числа: «1,234 watching now», «1.2K watching», «1,2 тыс.» */
+function humanNumber(text) {
+  if (!text) return -1;
+  const match = String(text).match(/(\d+(?:[.,\s\u00a0\u202f]\d+)*)\s*(млн|тыс|k|к|m|м)?/i);
+  if (!match) return -1;
+  const digits = match[1];
+  const suffix = (match[2] || "").toLowerCase();
+  const parts = digits.split(/[^\d]+/).filter(Boolean);
+  if (parts.length === 0) return -1;
+
+  let number;
+  if (suffix) {
+    // Последний разделитель — десятичный: «1,2 тыс.» → 1.2
+    number = (parts.length >= 2 && /[.,]/.test(digits))
+      ? parseFloat(parts[parts.length - 2] + "." + parts[parts.length - 1])
+      : parseFloat(parts[0]);
+  } else {
+    // Разделители разрядов: «1 234», «1,234»
+    number = parseFloat(parts.join(""));
+  }
+  if (!isFinite(number)) number = 0;
+
+  const factor = (suffix === "млн" || suffix === "m" || suffix === "м") ? 1000000
+    : (suffix ? 1000 : 1);
+  return Math.round(number * factor);
+}
+
+function jsonUnescape(text) {
+  return String(text)
+    .replace(/\\u([0-9a-fA-F]{4})/g, (m, hex) => String.fromCharCode(parseInt(hex, 16)))
+    .replace(/\\"/g, '"').replace(/\\\//g, "/").replace(/\\\\/g, "\\")
+    .replace(/\\n/g, " ").replace(/\\r/g, "").replace(/\\t/g, " ");
+}
+
+function firstMatch(body, expression) {
+  const match = body.match(expression);
+  return match ? match[1] : null;
+}
+
+/* Разбор ответов — тот же набор признаков, что и в нативном PollEngine. */
+function parseResponse(key, body) {
+  if (key === "vk") {
+    const live = /"status"\s*:\s*"[Ll]ive"/.test(body) || /"is_live"\s*:\s*true/.test(body);
+    if (!live) return { live: false };
+    const viewers = firstMatch(body, /"(?:viewers|viewers_count|online_count)"\s*:\s*"?(\d+)"?/);
+    return { live: true, viewers: viewers ? +viewers : 0,
+             title: jsonUnescape(firstMatch(body, /"title"\s*:\s*"((?:\\.|[^"\\])*)"/) || "") };
+  }
+  if (key === "tw") {
+    if (/"user"\s*:\s*null/.test(body)) return { live: false, error: "channel not found" };
+    if (!/"stream"\s*:\s*\{/.test(body)) return { live: false };
+    const viewers = firstMatch(body, /"viewersCount"\s*:\s*(\d+)/);
+    return { live: true, viewers: viewers ? +viewers : 0,
+             title: jsonUnescape(firstMatch(body, /"title"\s*:\s*"((?:\\.|[^"\\])*)"/) || "") };
+  }
+  if (key === "yt") {
+    let viewersText = firstMatch(body, /"viewCount"\s*:\s*\{[\s\S]{0,420}?"simpleText"\s*:\s*"([^"]+)"/);
+    if (!viewersText)
+      viewersText = firstMatch(body, /"shortViewCountText"\s*:\s*\{[\s\S]{0,320}?"(?:simpleText|text)"\s*:\s*"([^"]+)"/);
+    const live = /"isLive"\s*:\s*true/.test(body) || !!viewersText;
+    if (!live) return { live: false };
+    return { live: true, viewers: viewersText ? Math.max(0, humanNumber(viewersText)) : 0,
+             title: jsonUnescape(firstMatch(body, /"videoDetails"\s*:\s*\{[\s\S]{0,600}?"title"\s*:\s*"((?:\\.|[^"\\])*)"/) || "") };
+  }
+  if (key === "tt") {
+    if (!/"roomId"\s*:\s*"(\d+)"/.test(body)) return { live: false };
+    const viewers = firstMatch(body, /"viewerCount"\s*:\s*(\d+)/);
+    return { live: true, viewers: viewers ? +viewers : 0,
+             title: jsonUnescape(firstMatch(body, /"title"\s*:\s*"((?:\\.|[^"\\])*)"/) || "") };
+  }
+  if (key === "kc") {
+    const live = /"livestream"\s*:\s*\{/.test(body) || /"is_live"\s*:\s*true/.test(body);
+    if (!live) return { live: false };
+    const viewers = firstMatch(body, /"viewer_count"\s*:\s*(\d+)/);
+    return { live: true, viewers: viewers ? +viewers : 0,
+             title: jsonUnescape(firstMatch(body, /"session_title"\s*:\s*"((?:\\.|[^"\\])*)"/)
+                    || firstMatch(body, /"title"\s*:\s*"((?:\\.|[^"\\])*)"/) || "") };
+  }
+  if (key === "gg") {
+    if (!/"status"\s*:\s*"[Ll]ive"/.test(body)) return { live: false };
+    const viewers = firstMatch(body, /"viewers"\s*:\s*"?(\d+)"?/)
+        || firstMatch(body, /"viewer_count"\s*:\s*"?(\d+)"?/)
+        || firstMatch(body, /"count"\s*:\s*"?(\d+)"?/);
+    return { live: true, viewers: viewers ? +viewers : 0,
+             title: jsonUnescape(firstMatch(body, /"title"\s*:\s*"((?:\\.|[^"\\])*)"/) || "") };
+  }
+  return { live: false };
+}
+
+async function fetchPlatform(key) {
+  const channel = String(S[key] || "").trim().replace(/^@/, "");
+  if (!channel) return;
+  const info = PLATFORMS[key];
+  state[key].loading = true;
+  render();
+
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 10000); // ФТ-3.2: 10 с
+    const options = { signal: controller.signal, headers: {} };
+    if (key === "tw") {
+      options.method = "POST";
+      options.headers["Content-Type"] = "application/json";
+      options.headers["Client-ID"] = "kimne78kx3ncx6brgo4mv6wki5h1ko";
+      options.body = JSON.stringify([{
+        query: 'query { user(login: "' + channel.replace(/"/g, "") + '") { stream { viewersCount title } } }',
+      }]);
+    } else {
+      options.headers["Accept"] = key === "kc" ? "application/json" : "text/html,*/*";
+    }
+    const response = await fetch(info.url(channel), options);
+    clearTimeout(timer);
+    if (!response.ok) throw new Error("HTTP " + response.status);
+    const body = await response.text();
+    const parsed = parseResponse(key, body);
+    state[key].loading = false;
+    state[key].error = !!parsed.error;
+    state[key].live = !!parsed.live;
+    state[key].viewers = parsed.live ? (parsed.viewers || 0) : 0;
+    state[key].title = parsed.title || "";
+  } catch (error) {
+    state[key].loading = false;
+    // CORS или сеть — площадка недоступна из браузера, но это не крах (НФТ-5).
+    state[key].error = true;
+    state[key].live = false;
+    state[key].viewers = 0;
+  }
+  render();
+}
+
+function pollAll() {
+  PLATFORM_KEYS.forEach(fetchPlatform);
+}
+
+/* Демо-режим: правдоподобные «живые» счётчики. */
+function demoTick() {
+  PLATFORM_KEYS.forEach((key, index) => {
+    const item = state[key];
+    if (!item.live) {
+      if (Math.random() < 0.2) { item.live = true; item.viewers = 40 + Math.random() * 900; }
+    } else {
+      item.viewers = Math.max(5, item.viewers + (Math.random() - 0.45) * item.viewers * 0.06);
+      if (Math.random() < 0.03) { item.live = false; item.viewers = 0; }
+    }
+    item.title = item.live ? "YawaMetrics demo stream" : "";
+    item.error = false;
+  });
+  render();
+}
+
+/* ============================== Отрисовка ============================== */
+
+const widget = document.getElementById("widget");
+const stage = document.getElementById("stage");
+
+function brandSpan(key) {
+  const info = PLATFORMS[key];
+  return '<span class="brand" style="background:' + info.color + '">' + info.code + "</span>";
+}
+
+function dotFor(key) {
+  const item = state[key];
+  const cls = item.live ? "dot live" : (item.error ? "dot err" : "dot");
+  return '<span class="' + cls + '"></span>';
+}
+
+function platformList() {
+  return PLATFORM_KEYS.filter(key => enabled(key));
+}
+
+function visibleList() {
+  const list = platformList();
+  return S.tiles ? list : [];
+}
+
+function esc(text) {
+  return String(text == null ? "" : text)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function render() {
+  const accent = ACCENT_MAP[S.accent] || ACCENT_MAP.violet;
+  const root = document.documentElement;
+  root.style.setProperty("--acc1", accent[0]);
+  root.style.setProperty("--acc2", accent[1]);
+  root.style.setProperty("--bg-alpha", (S.bg / 100).toFixed(3));
+  root.style.setProperty("--radius", S.radius + "px");
+  root.style.setProperty("--scale", (S.scale / 100).toFixed(3));
+  root.style.setProperty("--blur", S.blur ? "8px" : "0px");
+
+  document.body.classList.toggle("no-anim", !S.anim);
+  widget.classList.toggle("has-frame", S.bg > 0);
+  widget.className = "widget has-frame w-" + S.style;
+  if (S.bg === 0) widget.className = "widget w-" + S.style;
+
+  const total = totalViewers();
+  const platforms = visibleList();
+  let html = "";
+
+  if (S.style === "panel") {
+    html = "";
+    if (S.total) {
+      html += '<div class="total-block"><span class="num">' + fmt(total) + "</span>" +
+              '<span class="lbl">' + esc(t("totalViewers")) + "</span></div>";
+    }
+    const chips = platforms.map(key => {
+      const item = state[key];
+      return '<div class="chip"><div class="row">' + brandSpan(key) +
+             (S.names ? '<span class="code">' + esc(PLATFORMS[key].code) + "</span>" : "") +
+             dotFor(key) + "</div>" +
+             '<span class="num">' + (item.live ? fmt(item.viewers) : "—") + "</span>" +
+             (S.names ? '<span class="nm">' + esc(PLATFORMS[key].name) + "</span>" : "") +
+             "</div>";
+    }).join("");
+    html += '<div class="chips">' + chips + "</div>";
+  } else if (S.style === "stack") {
+    html = "";
+    if (S.total) {
+      html += '<div class="total-row"><span class="num">' + fmt(total) + "</span>" +
+              '<span class="lbl">' + esc(t("totalViewers")) + "</span></div>";
+    }
+    html += platforms.map(key => {
+      const item = state[key];
+      return '<div class="prow">' + dotFor(key) +
+             (S.names ? '<span class="nm">' + esc(PLATFORMS[key].name) + "</span>" : "") +
+             '<span class="num">' + (item.live ? fmt(item.viewers) : "—") + "</span></div>";
+    }).join("");
+    const liveTitles = platforms.filter(key => state[key].live && state[key].title);
+    if (S.title && liveTitles.length) {
+      html += '<div class="stream-title">' + esc(liveTitles[0].title) + "</div>";
+    }
+  } else if (S.style === "badge") {
+    const eye = '<svg class="eye" viewBox="0 0 24 24" fill="none">' +
+      '<path d="M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12z" stroke="' + accent[0] +
+      '" stroke-width="2" stroke-linejoin="round"/><circle cx="12" cy="12" r="3" fill="' + accent[1] + '"/></svg>';
+    html = eye + '<span class="num">' + fmt(total) + '</span>' +
+           '<span class="side"><span class="lbl">' + esc(t("viewers")) + "</span>" +
+           (S.tiles && liveCount() ? '<span class="lbl" style="color:' + accent[1] + '">' +
+             liveCount() + " · live</span>" : "") + "</span>";
+  } else if (S.style === "cards") {
+    html = "";
+    if (S.total) {
+      html += '<div class="card-total"><span class="num">' + fmt(total) + "</span>" +
+              '<span class="lbl">' + esc(t("totalViewers")) + "</span></div>";
+    }
+    html += platforms.map(key => {
+      const item = state[key];
+      return '<div class="card"><div class="head">' + brandSpan(key) +
+             (S.names ? '<span class="nm">' + esc(PLATFORMS[key].name) + "</span>" : "") +
+             dotFor(key) + "</div>" +
+             '<span class="num">' + (item.live ? fmt(item.viewers) : "—") + "</span>" +
+             (S.title && item.title ? '<span class="st">' + esc(item.title) + "</span>" : "") +
+             "</div>";
+    }).join("");
+  } else if (S.style === "minimal") {
+    html = '<span class="num">' + fmt(total) + '</span>' +
+           '<span class="lbl">' + esc(t("viewers")) + "</span>";
+  } else if (S.style === "ticker") {
+    const segment = () => {
+      const items = platforms.map(key => {
+        const item = state[key];
+        return '<span class="item">' + dotFor(key) +
+               (S.names ? '<span class="code">' + esc(PLATFORMS[key].name.toUpperCase()) + "</span>" : "") +
+               '<span class="num">' + (item.live ? fmt(item.viewers) : "—") + "</span></span>";
+      });
+      if (S.total) {
+        items.push('<span class="item total"><span class="code">' + esc(t("total").toUpperCase()) +
+                   "</span>" + '<span class="num">' + fmt(total) + "</span></span>");
+      }
+      return '<div class="seg">' + items.join("") + "</div>";
+    };
+    html = '<div class="track">' + segment() + segment() + "</div>";
+  }
+
+  widget.innerHTML = html;
+
+  if (S.style === "ticker") {
+    const track = widget.querySelector(".track");
+    if (track) {
+      const width = track.scrollWidth / 2 || 1;
+      track.style.setProperty("--ticker-dur",
+        Math.max(8, Math.round(width / 55)) + "s");
+    }
+    stage.classList.add("bottom");
+    widget.style.width = "100%";
+  } else {
+    stage.classList.remove("bottom");
+    widget.style.width = "";
+  }
+}
+
+/* ============================== Настройки ============================== */
+
+function buildUrl() {
+  const base = location.href.split(/[?#]/)[0];
+  const parts = [];
+  parts.push("style=" + S.style);
+  parts.push("accent=" + S.accent);
+  parts.push("bg=" + S.bg);
+  parts.push("radius=" + S.radius);
+  parts.push("scale=" + S.scale);
+  parts.push("blur=" + (S.blur ? 1 : 0));
+  ["tiles", "total", "names", "title", "anim", "demo"].forEach(key => {
+    parts.push(key + "=" + (S[key] ? 1 : 0));
+  });
+  parts.push("interval=" + S.interval);
+  parts.push("lang=" + S.lang);
+  PLATFORM_KEYS.forEach(key => {
+    if (String(S[key] || "").trim() !== "") parts.push(key + "=" + encodeURIComponent(S[key]));
+  });
+  return base + "?" + parts.join("&");
+}
+
+function persist() {
+  try { localStorage.setItem(STORE_KEY, JSON.stringify(S)); } catch (e) { /* ignore */ }
+}
+
+function syncConfigPanel() {
+  const el = id => document.getElementById(id);
+  el("cStyle").value = S.style;
+  el("cAccent").value = S.accent;
+  el("cBg").value = S.bg; el("cBgV").textContent = S.bg + "%";
+  el("cRadius").value = S.radius; el("cRadiusV").textContent = S.radius + "px";
+  el("cScale").value = S.scale; el("cScaleV").textContent = S.scale + "%";
+  el("cBlur").checked = !!S.blur;
+  el("cTiles").checked = !!S.tiles;
+  el("cTotal").checked = !!S.total;
+  el("cNames").checked = !!S.names;
+  el("cTitle").checked = !!S.title;
+  el("cAnim").checked = !!S.anim;
+  el("cDemo").checked = !!S.demo;
+  el("chVk").value = S.vk; el("chTw").value = S.tw; el("chYt").value = S.yt;
+  el("chTt").value = S.tt; el("chKc").value = S.kc; el("chGg").value = S.gg;
+  el("urlPreview").textContent = buildUrl();
+}
+
+function bindConfig() {
+  const el = id => document.getElementById(id);
+  document.getElementById("configBtn").addEventListener("click", () => {
+    document.body.classList.toggle("config-open");
+    syncConfigPanel();
+  });
+
+  const onChange = (elementId, apply) => {
+    el(elementId).addEventListener("input", () => { apply(el(elementId)); render(); syncConfigPanel(); });
+  };
+
+  onChange("cStyle", e => { S.style = e.value; });
+  onChange("cAccent", e => { S.accent = e.value; });
+  onChange("cBg", e => { S.bg = clamp(e.value, 0, 100); });
+  onChange("cRadius", e => { S.radius = clamp(e.value, 0, 32); });
+  onChange("cScale", e => { S.scale = clamp(e.value, 75, 160); });
+  const onCheck = (elementId, key) => {
+    el(elementId).addEventListener("change", () => { S[key] = el(elementId).checked ? 1 : 0; render(); syncConfigPanel(); });
+  };
+  onCheck("cBlur", "blur"); onCheck("cTiles", "tiles"); onCheck("cTotal", "total");
+  onCheck("cNames", "names"); onCheck("cTitle", "title"); onCheck("cAnim", "anim");
+  onCheck("cDemo", "demo");
+  [["chVk", "vk"], ["chTw", "tw"], ["chYt", "yt"],
+   ["chTt", "tt"], ["chKc", "kc"], ["chGg", "gg"]].forEach(([id, key]) => {
+    el(id).addEventListener("input", () => { S[key] = el(id).value.trim(); render(); syncConfigPanel(); });
+  });
+
+  el("btnSave").addEventListener("click", () => { persist(); el("btnSave").textContent = "Сохранено ✓"; });
+  el("btnCopy").addEventListener("click", async () => {
+    const url = buildUrl();
+    try {
+      await navigator.clipboard.writeText(url);
+    } catch (e) {
+      const area = document.createElement("textarea");
+      area.value = url; document.body.appendChild(area);
+      area.select(); document.execCommand("copy"); area.remove();
+    }
+    el("btnCopy").textContent = "Скопировано ✓";
+    setTimeout(() => { el("btnCopy").textContent = "Копировать ссылку"; }, 1500);
+  });
+}
+
+/* ============================== Запуск ============================== */
+
+bindConfig();
+render();
+
+if (isDemo()) {
+  demoTick();
+  setInterval(() => { if (isDemo()) demoTick(); }, 3000);
+} else {
+  pollAll();
+  setInterval(() => { if (!isDemo()) pollAll(); }, S.interval * 1000);
+}
+
+if (S.config) {
+  document.body.classList.add("config-open");
+  syncConfigPanel();
+}
+</script>
+</body>
+</html>

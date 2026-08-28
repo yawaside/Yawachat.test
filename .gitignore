@@ -1,0 +1,35 @@
+# Сборка
+native/.build/
+native/.deps/
+build/
+out/
+package/
+installer-output/
+*.dll
+*.lib
+*.exp
+*.obj
+*.pdb
+
+# CMake
+CMakeUserPresets.json
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+
+# IDE
+.vs/
+.vscode/
+.idea/
+*.user
+
+# Система
+Thumbs.db
+.DS_Store
+
+# Node (для вспомогательных скриптов)
+node_modules/
+
+# Артефакты
+*.zip
+*.exe
