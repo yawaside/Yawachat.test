@@ -84,7 +84,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: native/.deps
-          key: obsdeps-windows-x64-${{ hashFiles('native/buildspec.json') }}
+          key: obsdeps-windows-x64-${{ hashFiles('native/buildspec.json', 'scripts/Install-ObsDeps.ps1') }}
 
       - name: Set up MSVC environment
         uses: ilammy/msvc-dev-cmd@v1

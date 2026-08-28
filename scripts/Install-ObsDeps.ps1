@@ -13,8 +13,10 @@
         paths manifest       -> native/.deps/obs-include-dirs.cmake
         import libraries     -> native/.deps/import-libs/{obs,obs-frontend-api}.lib
 
-    Import libraries are generated from the portable DLLs:
-    dumpbin /exports -> .def -> lib /def /machine:x64.
+    Import libraries are generated from the portable DLLs by reading the PE
+    export table directly (no dumpbin): exports -> .def -> lib /def /machine:x64.
+    Reading the PE directory in PowerShell keeps the step independent from
+    dumpbin availability, locale and output formatting.
 
     The script is idempotent: every step is skipped when its output already
     exists (pass -Force to redo everything). Archives are validated against
@@ -147,42 +149,191 @@ function Find-Tool {
     throw "$Name not found. Run from a VS 2022 developer prompt or install the MSVC toolchain."
 }
 
+function Test-IsPeFile {
+    # MZ + PE-подпись по смещению из DOS-заголовка. Используется и для
+    # самопроверки кэша/результатов распаковки (испорченный файл => перекачать).
+    param([string]$Path)
+    if (-not (Test-Path -LiteralPath $Path)) { return $false }
+    try {
+        $stream = [System.IO.File]::OpenRead($Path)
+        try {
+            if ($stream.Length -lt 64) { return $false }
+            $two = New-Object byte[] 2
+            [void]$stream.Read($two, 0, 2)
+            if ($two[0] -ne 0x4D -or $two[1] -ne 0x5A) { return $false }
+            $stream.Position = 0x3C
+            $four = New-Object byte[] 4
+            if ($stream.Read($four, 0, 4) -ne 4) { return $false }
+            $peOff = [BitConverter]::ToInt32($four, 0)
+            if ($peOff -lt 0 -or ($peOff + 4) -gt $stream.Length) { return $false }
+            $stream.Position = $peOff
+            [void]$stream.Read($two, 0, 2)
+            return ($two[0] -eq 0x50 -and $two[1] -eq 0x45)
+        } finally {
+            $stream.Close()
+        }
+    } catch {
+        return $false
+    }
+}
+
+function Test-IsImportLib {
+    # Импортная библиотека — COFF-архив, начинается с '!<arch>' + 0x0A
+    # (байты 21 3C 61 72 63 68 3E 0A).
+    param([string]$Path)
+    if (-not (Test-Path -LiteralPath $Path)) { return $false }
+    try {
+        $item = Get-Item -LiteralPath $Path
+        if ($item.Length -lt 1024) { return $false }
+        $stream = [System.IO.File]::OpenRead($Path)
+        try {
+            $sig = New-Object byte[] 8
+            [void]$stream.Read($sig, 0, 8)
+            return ($sig[0] -eq 0x21 -and $sig[1] -eq 0x3C -and $sig[2] -eq 0x61 -and
+                    $sig[3] -eq 0x72 -and $sig[4] -eq 0x63 -and $sig[5] -eq 0x68 -and
+                    $sig[6] -eq 0x3E -and $sig[7] -eq 0x0A)
+        } finally {
+            $stream.Close()
+        }
+    } catch {
+        return $false
+    }
+}
+
+function Read-PeExportNames {
+    # Имена экспортов напрямую из PE-таблицы экспортов (без dumpbin):
+    # не зависит от окружения MSVC, локали и формата вывода сторонних утилит.
+    param([string]$DllPath)
+
+    $bytes = [System.IO.File]::ReadAllBytes($DllPath)
+    if ($bytes.Length -lt 64 -or $bytes[0] -ne 0x4D -or $bytes[1] -ne 0x5A) {
+        throw "Not a PE file (MZ signature missing): $DllPath ($($bytes.Length) bytes)"
+    }
+    $peOff = [BitConverter]::ToInt32($bytes, 0x3C)
+    if ($peOff -lt 0 -or ($peOff + 264) -gt $bytes.Length) {
+        throw "Not a PE file (bad PE header offset): $DllPath"
+    }
+    if ($bytes[$peOff] -ne 0x50 -or $bytes[$peOff + 1] -ne 0x45 -or
+        $bytes[$peOff + 2] -ne 0 -or $bytes[$peOff + 3] -ne 0) {
+        throw "Not a PE file (PE\0\0 signature missing): $DllPath"
+    }
+    $machine = [BitConverter]::ToUInt16($bytes, $peOff + 4)
+    if ($machine -ne 0x8664) {
+        throw "Expected an x64 PE (machine 0x8664, got 0x{0:X4}): $DllPath" -f $machine
+    }
+    $numSections = [BitConverter]::ToUInt16($bytes, $peOff + 6)
+    $optSize = [BitConverter]::ToUInt16($bytes, $peOff + 20)
+    $optOff = $peOff + 24
+    $magic = [BitConverter]::ToUInt16($bytes, $optOff)
+    if ($magic -ne 0x20B -and $magic -ne 0x10B) {
+        throw "Unsupported optional header magic 0x{0:X4}: $DllPath" -f $magic
+    }
+    $dataDirOff = $optOff + 112  # PE32+ (мы уже проверили machine x64)
+    $exportRva = [BitConverter]::ToUInt32($bytes, $dataDirOff)
+    if ($exportRva -eq 0) {
+        throw "PE file has no export directory: $DllPath"
+    }
+
+    # Секции для преобразования RVA -> смещение в файле.
+    $sectionsOff = $optOff + $optSize
+    if (($sectionsOff + $numSections * 40) -gt $bytes.Length) {
+        throw "Corrupt section table: $DllPath"
+    }
+    $sections = @()
+    for ($i = 0; $i -lt $numSections; ++$i) {
+        $s = $sectionsOff + $i * 40
+        # VirtualAddress(12) + VirtualSize(8) -> диапазон, PointerToRawData(20).
+        $sections += , @(
+            [BitConverter]::ToUInt32($bytes, $s + 12),
+            [BitConverter]::ToUInt32($bytes, $s + 8),
+            [BitConverter]::ToUInt32($bytes, $s + 20)
+        )
+    }
+    $rvaToFile = {
+        param([uint32]$Rva)
+        foreach ($sec in $sections) {
+            if ($Rva -ge $sec[0] -and $Rva -lt ($sec[0] + $sec[1])) {
+                return [long]([long]$sec[2] + [long]$Rva - [long]$sec[0])
+            }
+        }
+        return [long]-1
+    }
+
+    $expOff = & $rvaToFile $exportRva
+    if ($expOff -lt 0) {
+        throw "Export directory RVA 0x{0:X} is not mapped to any section: $DllPath" -f $exportRva
+    }
+    if (($expOff + 40) -gt $bytes.Length) {
+        throw "Corrupt export directory: $DllPath"
+    }
+
+    $nameCount = [BitConverter]::ToUInt32($bytes, [int]($expOff + 24))
+    $namesRva = [BitConverter]::ToUInt32($bytes, [int]($expOff + 32))
+    if ($nameCount -eq 0 -or $namesRva -eq 0) {
+        throw "PE export directory has no named exports: $DllPath"
+    }
+    if ($nameCount -gt 200000) {
+        throw "Implausible export name count ($nameCount) - corrupt PE?: $DllPath"
+    }
+    $namesOff = & $rvaToFile $namesRva
+    if ($namesOff -lt 0 -or (($namesOff + $nameCount * 4) -gt $bytes.Length)) {
+        throw "Export name table is out of bounds: $DllPath"
+    }
+
+    # Latin-1: байты 1:1 в символы, декорированные имена не искажаются.
+    $encoding = [System.Text.Encoding]::GetEncoding(28591)
+    $names = New-Object System.Collections.Generic.List[string]
+    for ($i = 0; $i -lt $nameCount; ++$i) {
+        $rva = [BitConverter]::ToUInt32($bytes, [int]($namesOff + $i * 4))
+        $off = & $rvaToFile $rva
+        if ($off -lt 0 -or $off -ge $bytes.Length) {
+            continue  # форвардер или испорченный элемент — пропускаем
+        }
+        $end = [int]$off
+        $limit = [Math]::Min($bytes.Length - 1, [int]$off + 4096)
+        while ($end -le $limit -and $bytes[$end] -ne 0) { ++$end }
+        if ($end -gt [int]$off) {
+            $names.Add($encoding.GetString($bytes, [int]$off, $end - [int]$off))
+        }
+    }
+    return $names
+}
+
 function New-ImportLibrary {
-    # dumpbin /exports -> .def -> lib /def /machine:x64
+    # Таблица экспортов PE -> .def -> lib /def /machine:x64.
+    # dumpbin больше не используется: его вывод в CI однажды оказался пустым
+    # (баннер на stdout, ошибка на скрытый stderr, код выхода не проверялся).
     param(
         [string]$DllPath,
         [string]$OutputLib
     )
-    $dumpbin = Find-Tool -Name "dumpbin.exe"
+    if (-not (Test-Path -LiteralPath $DllPath)) {
+        throw "DLL not found: $DllPath"
+    }
     $libTool = Find-Tool -Name "lib.exe"
 
-    Write-Host "  dumpbin: $dumpbin"
-    $exports = & $dumpbin /exports $DllPath 2>$null
-    if (-not $exports) {
-        throw "dumpbin produced no output for $DllPath"
-    }
-
-    $names = @()
-    foreach ($line in $exports) {
-        # "    ordinal hint RVA      name" rows:
-        # "          1    0 00001A40 obs_frontend_add_dock"
-        if ($line -match '^\s+\d+\s+[0-9A-Fa-f]+\s+[0-9A-Fa-f]+\s+(\S+)$') {
-            $names += $Matches[1]
-        }
-    }
-    if ($names.Count -eq 0) {
+    $names = Read-PeExportNames -DllPath $DllPath
+    if ($null -eq $names -or $names.Count -eq 0) {
         throw "No exports parsed from $DllPath"
     }
+    Write-Host ("  {0}: {1} exports" -f [System.IO.Path]::GetFileName($DllPath), $names.Count)
 
     $defPath = [System.IO.Path]::ChangeExtension($OutputLib, ".def")
-    $lines = @("EXPORTS")
-    $lines += $names | ForEach-Object { "    $_" }
+    $lines = New-Object System.Collections.Generic.List[string]
+    [void]$lines.Add("EXPORTS")
+    foreach ($name in $names) {
+        [void]$lines.Add("    $name")
+    }
     [System.IO.File]::WriteAllLines($defPath, $lines)
 
     Write-Host "  lib: $($names.Count) exports -> $([System.IO.Path]::GetFileName($OutputLib))"
-    & $libTool /def:"$defPath" /machine:x64 /out:"$OutputLib" | Out-Null
+    & $libTool /def:"$defPath" /machine:x64 /out:"$OutputLib" 2>$null | Out-Null
     if ($LASTEXITCODE -ne 0) {
-        throw "lib.exe failed for $DllPath (exit code $LASTEXITCODE)"
+        throw "lib.exe failed for $DllPath (exit code $LASTEXITCODE). " +
+              "Verify the MSVC toolchain is available (lib.exe: $libTool)."
+    }
+    if (-not (Test-IsImportLib -Path $OutputLib)) {
+        throw "lib.exe did not produce a valid import library at $OutputLib"
     }
 }
 
@@ -275,14 +426,20 @@ if (-not (Test-Path $ObsConfigHeader) -or $Force) {
 
 $ObsPortableDir = Join-Path $DepsDir "obs-studio-portable"
 $ObsDll = Join-Path $ObsPortableDir "bin\64bit\obs.dll"
-if ((Test-Path $ObsDll) -and -not $Force) {
+if ((Test-IsPeFile -Path $ObsDll) -and -not $Force) {
     Write-Step "obs-studio portable: already present"
 } else {
+    if ((Test-Path $ObsDll) -and -not (Test-IsPeFile -Path $ObsDll)) {
+        Write-Step "obs.dll is not a valid PE - re-extracting the portable build"
+    }
     Write-Step "obs-studio $ObsVersion portable -> native/.deps/obs-studio-portable"
     $zip = Get-RemoteArchive `
         -Uri "https://github.com/obsproject/obs-studio/releases/download/$ObsVersion/OBS-Studio-$ObsVersion.zip" `
         -Name "OBS-Studio-$ObsVersion.zip"
     Expand-ZipNormalized -ZipPath $zip -Destination $ObsPortableDir
+    if (-not (Test-IsPeFile -Path $ObsDll)) {
+        throw "obs.dll is missing or not a valid PE after extraction: $ObsDll"
+    }
 }
 
 # --- 5. Import libraries ------------------------------------------------------
@@ -290,15 +447,15 @@ if ((Test-Path $ObsDll) -and -not $Force) {
 $ImportLibDir = Join-Path $DepsDir "import-libs"
 $ObsLib = Join-Path $ImportLibDir "obs.lib"
 $ObsFrontendLib = Join-Path $ImportLibDir "obs-frontend-api.lib"
-if ((Test-Path $ObsLib) -and (Test-Path $ObsFrontendLib) -and -not $Force) {
+if ((Test-IsImportLib -Path $ObsLib) -and (Test-IsImportLib -Path $ObsFrontendLib) -and -not $Force) {
     Write-Step "Import libraries: already present"
 } else {
     Write-Step "Import libraries -> native/.deps/import-libs"
     New-Item -ItemType Directory -Path $ImportLibDir -Force | Out-Null
     New-ImportLibrary -DllPath $ObsDll -OutputLib $ObsLib
     $FrontendDll = Join-Path $ObsPortableDir "bin\64bit\obs-frontend-api.dll"
-    if (-not (Test-Path $FrontendDll)) {
-        throw "obs-frontend-api.dll not found at $FrontendDll"
+    if (-not (Test-IsPeFile -Path $FrontendDll)) {
+        throw "obs-frontend-api.dll not found (or not a valid PE) at $FrontendDll"
     }
     New-ImportLibrary -DllPath $FrontendDll -OutputLib $ObsFrontendLib
 }
