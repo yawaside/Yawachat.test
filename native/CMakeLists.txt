@@ -38,6 +38,12 @@ set(YAWAMETRICS_SOURCES
 
 set(CMAKE_AUTOMOC ON)
 
+# DLL кладётся в корень каталога сборки (native/.build/windows-ci-x64),
+# где её ждёт .github/scripts/package-zip.ps1. Без этого module-цель из
+# add_subdirectory(native) оказывается в <build>/native/yawametrics.dll.
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+
 add_library(yawametrics MODULE ${YAWAMETRICS_SOURCES})
 
 set_target_properties(yawametrics PROPERTIES

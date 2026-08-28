@@ -19,7 +19,28 @@ if (-not $OutDir)   { $OutDir = Join-Path $RepoRoot "package" }
 
 $Dll = Join-Path $BuildDir "yawametrics.dll"
 if (-not (Test-Path $Dll)) {
-    throw "yawametrics.dll not found at $Dll - build the native preset first."
+    # До явного CMAKE_RUNTIME_OUTPUT_DIRECTORY DLL попадала в подкаталог
+    # native/ (add_subdirectory) или в runtime-раскладку POST_BUILD.
+    # Ищем по известным местам, затем рекурсивно.
+    $candidates = @(
+        (Join-Path $BuildDir "native\yawametrics.dll"),
+        (Join-Path $BuildDir "native\package\obs-plugins\64bit\yawametrics.dll"),
+        (Join-Path $BuildDir "RelWithDebInfo\yawametrics.dll"),
+        (Join-Path $BuildDir "Release\yawametrics.dll"),
+        (Join-Path $BuildDir "Debug\yawametrics.dll")
+    )
+    $found = $candidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+    if (-not $found) {
+        $found = Get-ChildItem -LiteralPath $BuildDir -Recurse -Filter "yawametrics.dll" `
+            -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($found) { $found = $found.FullName }
+    }
+    if ($found) {
+        Write-Host "yawametrics.dll found at $found (expected at $Dll)"
+        $Dll = $found
+    } else {
+        throw "yawametrics.dll not found at $Dll or anywhere under $BuildDir - build the native preset first."
+    }
 }
 
 $Staging = Join-Path $OutDir "staging"
