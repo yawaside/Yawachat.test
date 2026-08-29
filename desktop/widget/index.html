@@ -1,0 +1,424 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <title>YawaChatHub — OBS widget</title>
+    <link
+      href="https://fonts.googleapis.com/css2?family=Onest:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&family=Unbounded:wght@400;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root { color-scheme: dark; }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; }
+      body {
+        padding: 10px;
+        display: flex;
+        flex-direction: column;
+        justify-content: flex-end;
+        gap: 6px;
+        font-family: var(--font, "Onest", "Segoe UI", system-ui, sans-serif);
+      }
+      body.dir-down { justify-content: flex-start; }
+      #stack { display: flex; flex-direction: column; gap: var(--gap, 6px); }
+      body.dir-down #stack { flex-direction: column; }
+
+      .msg {
+        position: relative;
+        padding: 9px 12px;
+        border-radius: var(--r, 12px);
+        background: var(--bg, rgba(10, 11, 18, 0.7));
+        background-image: var(--bg-image, none);
+        background-size: cover;
+        background-position: center;
+        border: 1px solid var(--border, rgba(255, 255, 255, 0.1));
+        box-shadow: var(--shadow, none);
+        color: var(--text, #f2f3f8);
+        font-size: var(--fs, 16px);
+        font-weight: var(--fw, 500);
+        letter-spacing: var(--ls, 0);
+        text-shadow: var(--tsh, none);
+        line-height: 1.4;
+        overflow-wrap: anywhere;
+        word-break: normal;
+        white-space: normal;
+        backdrop-filter: blur(var(--blur, 0px));
+      }
+      .msg .row { display: flex; align-items: flex-start; gap: 8px; }
+      .msg .body { min-width: 0; flex: 1; }
+      .msg .who {
+        font-weight: var(--nfw, 700);
+        color: var(--name, #a78bfa);
+        text-shadow: var(--nsh, none);
+        margin-right: 6px;
+      }
+      .msg.upper .who { text-transform: uppercase; }
+      .msg .time {
+        font-family: ui-monospace, Consolas, monospace;
+        font-size: 0.72em;
+        opacity: 0.6;
+        margin-right: 6px;
+      }
+      .msg .plat {
+        display: inline-grid;
+        place-items: center;
+        width: 1.15em;
+        height: 1.15em;
+        flex: 0 0 auto;
+        margin-top: 0.15em;
+        font-size: 0.8em;
+        font-weight: 700;
+        color: #fff;
+      }
+      .plat.circle { border-radius: 50%; }
+      .plat.rounded { border-radius: 5px; }
+      .plat.square { border-radius: 2px; }
+      .plat.glow { box-shadow: 0 0 10px currentColor; }
+      .msg .emote { height: 1.4em; vertical-align: -0.3em; margin: 0 1px; }
+
+      .msg.out { opacity: 0; transform: translateY(-6px); transition: all 0.35s ease; }
+
+      /* ---------- анимации появления ---------- */
+      .fx-fade { animation: fx-fade var(--dur, .32s) ease-out both; }
+      .fx-slide-up { animation: fx-slide-up var(--dur, .32s) cubic-bezier(.22,1,.36,1) both; }
+      .fx-slide-left { animation: fx-slide-left var(--dur, .32s) cubic-bezier(.22,1,.36,1) both; }
+      .fx-scale { animation: fx-scale var(--dur, .32s) cubic-bezier(.22,1,.36,1) both; }
+      .fx-blur { animation: fx-blur var(--dur, .32s) ease-out both; }
+      .fx-bounce { animation: fx-bounce calc(var(--dur, .32s) * 1.5) cubic-bezier(.28,1.4,.5,1) both; }
+      .fx-typewriter { animation: fx-fade var(--dur, .32s) ease-out both; }
+
+      @keyframes fx-fade { from { opacity: 0 } to { opacity: 1 } }
+      @keyframes fx-slide-up { from { opacity: 0; transform: translateY(18px) } to { opacity: 1; transform: none } }
+      @keyframes fx-slide-left { from { opacity: 0; transform: translateX(38px) } to { opacity: 1; transform: none } }
+      @keyframes fx-scale { from { opacity: 0; transform: scale(.86) } to { opacity: 1; transform: none } }
+      @keyframes fx-blur { from { opacity: 0; filter: blur(9px) } to { opacity: 1; filter: blur(0) } }
+      @keyframes fx-bounce {
+        0% { opacity: 0; transform: translateY(26px) scale(.95) }
+        60% { opacity: 1; transform: translateY(-5px) scale(1.02) }
+        100% { opacity: 1; transform: none }
+      }
+
+      #hint {
+        font-family: ui-monospace, Consolas, monospace;
+        font-size: 11px;
+        opacity: 0.6;
+        color: #9aa1b5;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="stack"></div>
+    <div id="hint">ожидание подключения…</div>
+
+    <script>
+      const q = new URLSearchParams(location.search);
+      const token = q.get("token") || "";
+      const port = q.get("port") || location.port || "47823";
+
+      const stack = document.getElementById("stack");
+      const hint = document.getElementById("hint");
+      const root = document.documentElement;
+
+      const PLAT = {
+        twitch: { c: "#a970ff", s: "T" },
+        youtube: { c: "#ff4e45", s: "Y" },
+        vk: { c: "#4c8dff", s: "B" },
+        kick: { c: "#53fc18", s: "K" },
+        tiktok: { c: "#ff3b5c", s: "TT" },
+      };
+
+      let cfg = {
+        fontSize: 16,
+        dir: "up",
+        duration: 8,
+        maxMessages: 8,
+        showPlatform: true,
+        showTime: true,
+        effect: "slide-up",
+        effectDuration: 0.32,
+      };
+      let look = {
+        id: "clean",
+        background: "rgba(10,11,18,0.7)",
+        border: "rgba(255,255,255,0.1)",
+        shadow: "0 2px 14px rgba(0,0,0,0.35)",
+        text: "#f2f3f8",
+        name: "#a78bfa",
+        sub: "rgba(242,243,248,0.45)",
+        radius: 12,
+        fontFamily: '"Onest","Segoe UI",system-ui,sans-serif',
+        fontWeight: 500,
+        nameWeight: 700,
+        letterSpacing: 0,
+        textShadow: "none",
+        nameShadow: "none",
+        iconShape: "rounded",
+        iconGlow: false,
+        uppercaseName: false,
+        bgImage: "",
+      };
+
+      /* ---------- emotes ---------- */
+      const emoteMap = new Map();
+
+      async function loadEmotes() {
+        try {
+          const [seven, bttv] = await Promise.all([
+            fetch("https://7tv.io/v3/emote-sets/global").then((r) => r.ok ? r.json() : null).catch(() => null),
+            fetch("https://api.betterttv.net/3/cached/emotes/global").then((r) => r.ok ? r.json() : null).catch(() => null),
+          ]);
+          if (seven && seven.emotes) {
+            for (const e of seven.emotes) {
+              const host = e.data && e.data.host;
+              if (!host || !host.url) continue;
+              const files = host.files || [];
+              const file = files.find((f) => f.name === "2x.webp") || files.find((f) => f.name === "1x.webp") || files[0];
+              if (file && e.name) emoteMap.set(e.name, "https:" + host.url + "/" + file.name);
+            }
+          }
+          if (Array.isArray(bttv)) {
+            for (const e of bttv) {
+              if (e.code && e.id) emoteMap.set(e.code, "https://cdn.betterttv.net/emote/" + e.id + "/2x.webp");
+            }
+          }
+        } catch {}
+      }
+      loadEmotes();
+
+      function applyLook(next) {
+        if (next.cfg) cfg = { ...cfg, ...next.cfg };
+        if (next.look) look = { ...look, ...next.look };
+        root.style.setProperty("--bg", look.background);
+        root.style.setProperty("--bg-image", look.bgImage ? `url("${look.bgImage}")` : "none");
+        root.style.setProperty("--border", look.border);
+        root.style.setProperty("--shadow", look.shadow);
+        root.style.setProperty("--r", (look.radius ?? 12) + "px");
+        root.style.setProperty("--text", look.text);
+        root.style.setProperty("--name", look.name);
+        root.style.setProperty("--fs", (cfg.fontSize ?? 16) + "px");
+        root.style.setProperty("--fw", look.fontWeight ?? 500);
+        root.style.setProperty("--nfw", look.nameWeight ?? 700);
+        root.style.setProperty("--ls", (look.letterSpacing ?? 0) + "px");
+        root.style.setProperty("--tsh", look.textShadow || "none");
+        root.style.setProperty("--nsh", look.nameShadow || "none");
+        root.style.setProperty("--font", look.fontFamily);
+        root.style.setProperty("--dur", (cfg.effectDuration ?? 0.32) + "s");
+        root.style.setProperty("--blur", look.id === "glass" ? "10px" : "0px");
+        document.body.classList.toggle("dir-down", cfg.dir === "down");
+        while (stack.children.length > (cfg.maxMessages || 8)) {
+          stack.removeChild(stack.firstChild);
+        }
+      }
+
+      function renderText(container, msg) {
+        const rawParts = Array.isArray(msg.parts) && msg.parts.length ? msg.parts : null;
+        if (rawParts) {
+          for (const part of rawParts) {
+            if (part.type === "emote" && part.url) {
+              const img = document.createElement("img");
+              img.className = "emote";
+              img.src = part.url;
+              img.alt = part.value || "";
+              img.loading = "lazy";
+              container.appendChild(img);
+            } else {
+              container.appendChild(document.createTextNode(part.value || ""));
+            }
+          }
+          return;
+        }
+        const text = msg.text || "";
+        const tokens = text.split(/(\s+)/);
+        for (const tok of tokens) {
+          if (!tok) continue;
+          const url = emoteMap.get(tok);
+          if (url) {
+            const img = document.createElement("img");
+            img.className = "emote";
+            img.src = url;
+            img.alt = tok;
+            img.title = tok;
+            container.appendChild(img);
+          } else {
+            container.appendChild(document.createTextNode(tok));
+          }
+        }
+      }
+
+      function addMessage(m) {
+        if (!m || (!m.text && !m.parts)) return;
+        if (m.sys) return;
+        hint.style.display = "none";
+
+        const el = document.createElement("div");
+        el.className = "msg";
+        if (look.uppercaseName) el.classList.add("upper");
+        if (cfg.effect && cfg.effect !== "none") el.classList.add("fx-" + cfg.effect);
+
+        const row = document.createElement("div");
+        row.className = "row";
+
+        if (cfg.showPlatform) {
+          const p = PLAT[m.platform] || { c: "#a78bfa", s: "•" };
+          const dot = document.createElement("span");
+          dot.className = "plat " + (look.iconShape || "rounded") + (look.iconGlow ? " glow" : "");
+          dot.style.background = p.c;
+          dot.textContent = p.s;
+          row.appendChild(dot);
+        }
+
+        const body = document.createElement("div");
+        body.className = "body";
+
+        if (cfg.showTime) {
+          const time = document.createElement("span");
+          time.className = "time";
+          const d = new Date(m.ts || Date.now());
+          time.textContent = String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
+          body.appendChild(time);
+        }
+
+        const who = document.createElement("span");
+        who.className = "who";
+        if (m.color && look.id === "clean") who.style.color = m.color;
+        who.textContent = m.author || "зритель";
+        body.appendChild(who);
+
+        const textSpan = document.createElement("span");
+        if (cfg.effect === "typewriter") {
+          body.appendChild(textSpan);
+          const full = m.text || "";
+          let i = 0;
+          const speed = Math.max(12, ((cfg.effectDuration ?? 0.32) * 1000) / Math.max(full.length, 1));
+          const tick = () => {
+            const slice = full.slice(0, (i += 1));
+            textSpan.textContent = "";
+            const toks = slice.split(/(\s+)/);
+            for (const tok of toks) {
+              if (!tok) continue;
+              const url = emoteMap.get(tok);
+              if (url) {
+                const img = document.createElement("img");
+                img.className = "emote";
+                img.src = url;
+                img.alt = tok;
+                textSpan.appendChild(img);
+              } else {
+                textSpan.appendChild(document.createTextNode(tok));
+              }
+            }
+            if (i < full.length) setTimeout(tick, speed);
+          };
+          tick();
+        } else {
+          renderText(textSpan, m);
+          body.appendChild(textSpan);
+        }
+
+        row.appendChild(body);
+        el.appendChild(row);
+        stack.appendChild(el);
+
+        while (stack.children.length > (cfg.maxMessages || 8)) {
+          stack.removeChild(stack.firstChild);
+        }
+
+        const ttl = cfg.duration ?? 8;
+        if (ttl > 0) {
+          setTimeout(() => {
+            el.classList.add("out");
+            setTimeout(() => el.remove(), 400);
+          }, ttl * 1000);
+        }
+      }
+
+      // Очередь аудио для OBS: чтобы сообщения не накладывались
+      const audioQueue = [];
+      let audioPlaying = false;
+      const audioEl = document.createElement("audio");
+      audioEl.autoplay = true;
+      audioEl.style.display = "none";
+      document.body.appendChild(audioEl);
+      audioEl.onended = () => {
+        audioPlaying = false;
+        playNextAudio();
+      };
+      audioEl.onerror = () => {
+        audioPlaying = false;
+        playNextAudio();
+      };
+
+      function playNextAudio() {
+        if (audioPlaying || !audioQueue.length) return;
+        const next = audioQueue.shift();
+        if (!next) return;
+        audioPlaying = true;
+        if (next.audioBase64) {
+          audioEl.src = "data:audio/wav;base64," + next.audioBase64;
+          audioEl.volume = 1;
+          audioEl.play().catch(() => {
+            audioPlaying = false;
+            setTimeout(playNextAudio, 200);
+          });
+        } else if (next.text) {
+          // Fallback: Web Speech API (если SAPI WAV не пришёл)
+          const u = new SpeechSynthesisUtterance(next.text);
+          u.lang = "ru-RU";
+          u.rate = next.rate || 1;
+          u.volume = next.volume || 1;
+          const vs = window.speechSynthesis.getVoices();
+          const v = vs.find((x) => x.voiceURI === next.voice);
+          if (v) u.voice = v;
+          u.onend = () => {
+            audioPlaying = false;
+            playNextAudio();
+          };
+          u.onerror = () => {
+            audioPlaying = false;
+            playNextAudio();
+          };
+          window.speechSynthesis.speak(u);
+        } else {
+          audioPlaying = false;
+          playNextAudio();
+        }
+      }
+
+      function connect() {
+        const ws = new WebSocket("ws://127.0.0.1:" + port + "/ws?token=" + encodeURIComponent(token));
+        ws.onopen = () => {
+          hint.textContent = "подключено, ждём сообщения…";
+        };
+        ws.onmessage = (ev) => {
+          try {
+            const data = JSON.parse(ev.data);
+            if (data.type === "config") {
+              if (data.ttsAudio && data.ttsAudio.audioBase64) {
+                audioQueue.push({ audioBase64: data.ttsAudio.audioBase64 });
+                playNextAudio();
+              } else if (data.ttsPlay) {
+                audioQueue.push({
+                  text: data.ttsPlay.text,
+                  rate: data.ttsPlay.rate,
+                  volume: data.ttsPlay.volume,
+                  voice: data.ttsPlay.voice,
+                });
+                playNextAudio();
+              } else {
+                applyLook(data);
+              }
+            }
+            else if (data.type === "chat") addMessage(data.msg);
+          } catch {}
+        };
+        ws.onclose = () => {
+          hint.style.display = "block";
+          hint.textContent = "нет соединения — переподключение…";
+          setTimeout(connect, 2000);
+        };
+        ws.onerror = () => ws.close();
+      }
+      connect();
+    </script>
+  </body>
+</html>
