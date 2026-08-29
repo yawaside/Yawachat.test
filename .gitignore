@@ -1,0 +1,27 @@
+# зависимости
+node_modules/
+desktop/node_modules/
+
+# сборки — НЕ пушатся в git (весят >100МБ, собираются в GitHub Actions)
+# Готовые exe качаются из Actions → Artifacts и из Releases
+dist/
+desktop/release/
+desktop/renderer-dist/
+desktop/out/
+release-files/
+
+# настройки с токеном — не коммитим
+desktop/settings.json
+settings.json
+
+# тяжёлые нейроголоса — скачиваются в сборке (scripts/fetch-voices.sh), в git не хранятся
+desktop/models/piper/*.onnx
+desktop/models/piper/*.onnx.json
+desktop/models/silero/*.pt
+desktop/models/silero/*.onnx
+desktop/bin/
+
+# служебное
+.DS_Store
+Thumbs.db
+*.log
