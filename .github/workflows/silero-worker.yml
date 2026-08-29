@@ -1,0 +1,54 @@
+name: silero worker
+
+# Сборка встроенного Silero TTS-воркера (embedded Python + torch CPU + модель v5_5_ru).
+# Запускается по тегу worker-v* или вручную (Actions → Run workflow).
+# Публикует пакет в отдельный релиз: приложение само скачивает его при первом
+# использовании голосов Silero — exe приложения при этом не раздувается.
+on:
+  push:
+    tags: ["worker-v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Версия воркера (по умолчанию 1.0.0)"
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  build-worker:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Версия воркера
+        id: ver
+        shell: bash
+        run: |
+          V="${{ github.event.inputs.version }}"
+          if [ -z "$V" ] && [ "${{ github.ref_type }}" = "tag" ]; then
+            V="${GITHUB_REF_NAME#worker-v}"
+          fi
+          V="${V:-1.0.0}"
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          echo "Собираем Silero worker $V"
+
+      - name: Сборка воркера
+        shell: pwsh
+        run: |
+          .\desktop\tts-worker\build_worker.ps1 -OutDir . -ZipName "silero-worker-ru-${{ steps.ver.outputs.version }}.zip"
+
+      - name: Публикация релиза воркера
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: "silero-worker-v${{ steps.ver.outputs.version }}"
+          name: "Встроенные голоса Silero (v5_5_ru, русский) — worker v${{ steps.ver.outputs.version }}"
+          body: |
+            Портативный TTS-воркер для YawaChatHub: embedded Python + PyTorch CPU + модель `v5_5_ru` (голоса: Аидар, Бая, Ксения, Женя, Ксения-5).
+            Приложение скачивает этот пакет автоматически при первом включении голосов Silero — установка сторонних программ не нужна.
+          files: silero-worker-ru-${{ steps.ver.outputs.version }}.zip
+          overwrite: true
+          make_latest: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
