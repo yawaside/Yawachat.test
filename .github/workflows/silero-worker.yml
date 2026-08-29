@@ -1,0 +1,84 @@
+name: silero worker
+
+# Автосборка встроенного Silero TTS-воркера (embedded Python + torch CPU + v5_5_ru).
+# Проверяет изменения в desktop/tts-worker/* и desktop/electron/tts-silero.js.
+# Если ничего не изменилось — сборка пропускается.
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - 'desktop/tts-worker/**'
+      - 'desktop/electron/tts-silero.js'
+      - '.github/workflows/silero-worker.yml'
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Принудительная сборка (да/нет)"
+        required: false
+        default: "no"
+
+permissions:
+  contents: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.changes.outputs.changed }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Проверить изменения
+        id: changes
+        shell: bash
+        run: |
+          FORCE="${{ github.event.inputs.force }}"
+          if [ "$FORCE" = "yes" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          CHANGED=$(git diff --name-only ${{ github.event.before }} ${{ github.sha }} -- 'desktop/tts-worker/**' 'desktop/electron/tts-silero.js' '.github/workflows/silero-worker.yml' | wc -l)
+          if [ "$CHANGED" -gt 0 ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    needs: check
+    if: needs.check.outputs.changed == 'true' || github.event_name == 'workflow_dispatch'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Версия воркера
+        id: ver
+        shell: bash
+        run: |
+          DATE=$(date -u +%Y%m%d)
+          echo "version=1.0.${DATE}" >> "$GITHUB_OUTPUT"
+
+      - name: Сборка воркера
+        shell: pwsh
+        run: |
+          .\desktop\tts-worker\build_worker.ps1 -OutDir . -ZipName "silero-worker-ru-${{ steps.ver.outputs.version }}.zip"
+
+      - name: Публикация
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: "silero-worker-v${{ steps.ver.outputs.version }}"
+          name: "Встроенные голоса Silero (v5_5_ru) — worker v${{ steps.ver.outputs.version }}"
+          body: |
+            Портативный TTS-воркер для YawaChatHub:
+            - embedded Python 3.11
+            - PyTorch CPU
+            - модель v5_5_ru (Аидар, Бая, Ксения, Женя, Евгений)
+            - ~330 МБ, один раз
+          files: silero-worker-ru-${{ steps.ver.outputs.version }}.zip
+          overwrite: true
+          make_latest: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
