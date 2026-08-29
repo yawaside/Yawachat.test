@@ -1,0 +1,88 @@
+name: silero worker
+
+# Сборка встроенного Silero TTS-воркера (embedded Python + torch CPU + модель v5_5_ru).
+# Запускается автоматически только если изменились файлы воркера,
+# по тегу worker-v* или вручную (Actions → Run workflow).
+# Публикует пакет в отдельный релиз: приложение само скачивает его при первом
+# использовании голосов Silero — exe приложения при этом не раздувается.
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - "desktop/tts-worker/**"
+      - ".github/workflows/silero-worker.yml"
+    tags: ["worker-v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Версия воркера (по умолчанию 1.0.0)"
+        required: false
+      force:
+        description: "Пересобрать даже если релиз уже существует"
+        required: false
+        default: "false"
+
+permissions:
+  contents: write
+
+jobs:
+  build-worker:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Версия воркера
+        id: ver
+        shell: bash
+        run: |
+          V="${{ github.event.inputs.version }}"
+          if [ -z "$V" ] && [ "${{ github.ref_type }}" = "tag" ]; then
+            V="${GITHUB_REF_NAME#worker-v}"
+          fi
+          V="${V:-1.0.0}"
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          echo "Собираем Silero worker $V"
+
+      - name: Проверить, нужен ли rebuild
+        id: skip
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          FORCE: ${{ github.event.inputs.force }}
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          if [ "$FORCE" = "true" ]; then
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            echo "Force rebuild enabled"
+            exit 0
+          fi
+          if gh release view "silero-worker-v$VERSION" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            if gh release view "silero-worker-v$VERSION" --repo "$GITHUB_REPOSITORY" --json assets \
+              | grep -q "silero-worker-ru-$VERSION.zip"; then
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              echo "silero-worker-v$VERSION уже опубликован, пересборка не требуется"
+              exit 0
+            fi
+          fi
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+
+      - name: Сборка воркера
+        if: steps.skip.outputs.skip != 'true'
+        shell: pwsh
+        run: |
+          .\desktop\tts-worker\build_worker.ps1 -OutDir . -ZipName "silero-worker-ru-${{ steps.ver.outputs.version }}.zip"
+
+      - name: Публикация релиза воркера
+        if: steps.skip.outputs.skip != 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: "silero-worker-v${{ steps.ver.outputs.version }}"
+          name: "Встроенные голоса Silero (v5_5_ru, русский) — worker v${{ steps.ver.outputs.version }}"
+          body: |
+            Портативный TTS-воркер для YawaChatHub: embedded Python + PyTorch CPU + модель `v5_5_ru` (голоса: Аидар, Бая, Ксения, Женя, Ксения-5).
+            Приложение скачивает этот пакет автоматически при первом включении голосов Silero — установка сторонних программ не нужна.
+          files: silero-worker-ru-${{ steps.ver.outputs.version }}.zip
+          overwrite: true
+          make_latest: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
