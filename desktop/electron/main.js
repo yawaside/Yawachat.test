@@ -345,11 +345,27 @@ ipcMain.on("app:quit", () => {
 
 /* ---------------- запуск ---------------- */
 
-app.on("will-quit", () => {
+app.on("will-quit", async () => {
+  // Снимаем зарегистрированные хоткеи
   globalShortcut.unregisterAll();
+
+  // Останавливаем коннекторы (закрывает sokets/клиентов)
   try { if (connectors) connectors.stopAll(); } catch { /* noop */ }
-  try { if (widgetServer) widgetServer.close(); } catch { /* noop */ }
+
+  // Закрываем сервер виджета и все websocket-клиенты — ждём завершения
+  try {
+    if (widgetServer && widgetServer.close) {
+      // widgetServer.close может возвращать Promise (см. widgetServer.js)
+      const res = widgetServer.close();
+      if (res && typeof res.then === "function") await res;
+    }
+  } catch { /* noop */ }
+
+  // Закрываем Chromium net-стек
   try { closeNet(); } catch { /* noop */ }
+
+  // Останавливаем/убиваем процессы TTS
+  try { if (tts && typeof tts.dispose === "function") tts.dispose(); } catch { /* noop */ }
 });
 
 // окно может быть скрыто в трей — приложение не должно завершаться
