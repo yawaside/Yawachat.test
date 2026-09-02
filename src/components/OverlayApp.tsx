@@ -186,23 +186,19 @@ export default function OverlayApp() {
         ))}
       </div>
 
-+      {/* нижняя панель — зрители по площадкам */}
-+      <div className="shrink-0 border-t px-3 py-2 flex items-center justify-between" style={{ borderColor: "var(--dw-line)", background: "rgba(0,0,0,0.2)" }}>
-+        <div className="flex items-center gap-2">
-+          {online.map(([plat, n]) => (
-+            <div key={plat} className="flex items-center gap-2 rounded-xl px-2 py-1" style={{ background: "rgba(255,255,255,0.02)" }}>
-+              <span className="grid h-6 w-6 place-items-center" style={{ color: PLATFORMS[plat]?.color || "#fff" }}>
-+                <PlatformIcon id={plat} size={14} />
-+              </span>
-+              <span className="font-mono text-[12px]" style={{ color: "var(--dw-text)" }}>{n}</span>
-+            </div>
-+          ))}
-+        </div>
-+        <div className="font-mono text-[12px]" style={{ color: "var(--dw-dim)" }}>
-+          Всего: {viewers.total}
-+        </div>
-+      </div>
-+
-     </div>
-   );
- }
+      {/* нижняя панель — зрители по площадкам */}
+           <div className="shrink-0 border-t px-3 py-2 flex items-center justify-between" style={{ borderColor: "var(--dw-line)", background: "rgba(0,0,0,0.2)" }}>
+        <div className="flex items-center gap-2">
+          {online.map(([plat, n]) => (
+            <div key={plat} className="flex items-center gap-2 rounded-xl px-2 py-1" style={{ background: "rgba(255,255,255,0.02)" }}>
+              <span className="grid h-6 w-6 place-items-center" style={{ color: PLATFORMS[plat]?.color || "#fff" }}>
+                <PlatformIcon id={plat} size={14} />
+              </span>
+              <span className="font-mono text-[12px]" style={{ color: "var(--dw-text)" }}>{n}</span>
+            </div>
+          ))}
+        </div>
+        <div className="font-mono text-[12px]" style={{ color: "var(--dw-dim)" }}>
+          Всего: {viewers.total}
+        </div>
+      </div>
