@@ -15,6 +15,10 @@ contextBridge.exposeInMainWorld("sp", {
   removeChannel: (platform, channelId) => ipcRenderer.send("channels:remove", { platform, channelId }),
   diagnoseNet: () => ipcRenderer.send("net:diagnose"),
 
+  /* viewers */
+  onViewers: (cb) => ipcRenderer.on("sp:viewers", (_e, payload) => cb(payload)),
+  getViewers: () => ipcRenderer.invoke("viewers:get"),
+
   /* виджет OBS */
   widgetUrl: () => ipcRenderer.invoke("widget:url"),
   widgetInfo: () => ipcRenderer.invoke("widget:info"),
