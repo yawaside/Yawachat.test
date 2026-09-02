@@ -17,6 +17,7 @@ export default function OverlayApp() {
   const [cfg, setCfg] = useState<OverlayConfig>(DEFAULT_OVERLAY);
   const [feed, setFeed] = useState<ChatMsg[]>([]);
   const [hover, setHover] = useState(false);
+  const [viewers, setViewers] = useState<{ byPlatform: Record<string, number>; total: number }>({ byPlatform: {}, total: 0 });
 
   useEffect(() => {
     document.documentElement.classList.add("overlay-mode");
@@ -35,6 +36,9 @@ export default function OverlayApp() {
     sp.onChat((m) => setFeed((prev) => [...prev.slice(-60), m]));
     sp.overlay.get().then((o) => o && setCfg({ ...DEFAULT_OVERLAY, ...o }));
     sp.overlay.onChange((o) => setCfg((cur) => ({ ...cur, ...DEFAULT_OVERLAY, ...o })));
+
+    sp.onViewers((p) => setViewers(p));
+    sp.getViewers().then((p) => p && setViewers(p)).catch(() => {});
   }, [sp]);
 
   const look = useMemo(() => resolveOverlayLook(cfg), [cfg]);
@@ -48,6 +52,8 @@ export default function OverlayApp() {
       ? "rgba(139,92,246,0.55)"
       : look.border
     : "transparent";
+
+  const online = Object.entries(viewers.byPlatform).filter(([, n]) => Number(n) > 0);
 
   return (
     <div
@@ -179,6 +185,24 @@ export default function OverlayApp() {
           </div>
         ))}
       </div>
-    </div>
-  );
-}
+
++      {/* нижняя панель — зрители по площадкам */}
++      <div className="shrink-0 border-t px-3 py-2 flex items-center justify-between" style={{ borderColor: "var(--dw-line)", background: "rgba(0,0,0,0.2)" }}>
++        <div className="flex items-center gap-2">
++          {online.map(([plat, n]) => (
++            <div key={plat} className="flex items-center gap-2 rounded-xl px-2 py-1" style={{ background: "rgba(255,255,255,0.02)" }}>
++              <span className="grid h-6 w-6 place-items-center" style={{ color: PLATFORMS[plat]?.color || "#fff" }}>
++                <PlatformIcon id={plat} size={14} />
++              </span>
++              <span className="font-mono text-[12px]" style={{ color: "var(--dw-text)" }}>{n}</span>
++            </div>
++          ))}
++        </div>
++        <div className="font-mono text-[12px]" style={{ color: "var(--dw-dim)" }}>
++          Всего: {viewers.total}
++        </div>
++      </div>
++
+     </div>
+   );
+ }
