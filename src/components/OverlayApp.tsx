@@ -187,7 +187,7 @@ export default function OverlayApp() {
       </div>
 
       {/* нижняя панель — зрители по площадкам */}
-           <div className="shrink-0 border-t px-3 py-2 flex items-center justify-between" style={{ borderColor: "var(--dw-line)", background: "rgba(0,0,0,0.2)" }}>
+      <div className="shrink-0 border-t px-3 py-2 flex items-center justify-between" style={{ borderColor: "var(--dw-line)", background: "rgba(0,0,0,0.2)" }}>
         <div className="flex items-center gap-2">
           {online.map(([plat, n]) => (
             <div key={plat} className="flex items-center gap-2 rounded-xl px-2 py-1" style={{ background: "rgba(255,255,255,0.02)" }}>
@@ -202,3 +202,7 @@ export default function OverlayApp() {
           Всего: {viewers.total}
         </div>
       </div>
+
+    </div>
+  );
+}
