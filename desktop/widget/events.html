@@ -1,0 +1,57 @@
+// Events widget (OBS) — simple HTML + JS to render incoming event alerts
+// Connects to widgetServer websocket at /ws?token=<token> and listens for messages { type: 'event', event }
+
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    body { margin:0; background:transparent; font-family: Arial, sans-serif; }
+    .container { position: fixed; right: 20px; top: 20px; width: 360px; pointer-events: none; }
+    .card { background: rgba(0,0,0,0.7); color: #fff; padding: 12px 14px; margin-bottom: 10px; border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,0.6); opacity:0; transform: translateY(-8px); transition: opacity .25s, transform .25s; }
+    .card.show { opacity:1; transform: translateY(0); }
+    .title { font-weight:700; margin-bottom:6px; }
+    .body { font-size:14px; }
+  </style>
+</head>
+<body>
+  <div class="container" id="container"></div>
+  <script>
+    (function(){
+      const params = new URLSearchParams(location.search);
+      const token = params.get('token');
+      const host = location.origin.replace(/^http/, 'ws');
+      const wsUrl = token ? (host + '/ws?token=' + encodeURIComponent(token)) : null;
+      let ws = null;
+      if (wsUrl) {
+        try {
+          ws = new WebSocket(wsUrl);
+          ws.onmessage = (e) => {
+            try {
+              const msg = JSON.parse(e.data);
+              if (msg && msg.type === 'event' && msg.event) showEvent(msg.event);
+            } catch (err) { console.error(err); }
+          };
+        } catch (err) { console.error('ws', err); }
+      }
+
+      const container = document.getElementById('container');
+      function showEvent(ev) {
+        const id = 'ev_' + Date.now() + '_' + Math.random().toString(36).slice(2,6);
+        const el = document.createElement('div');
+        el.className = 'card';
+        const title = document.createElement('div'); title.className='title'; title.textContent = ev.title || (ev.platform + ' event');
+        const body = document.createElement('div'); body.className='body'; body.textContent = ev.body || JSON.stringify(ev.meta || {});
+        el.appendChild(title); el.appendChild(body);
+        container.prepend(el);
+        requestAnimationFrame(()=> el.classList.add('show'));
+        setTimeout(()=> { el.classList.remove('show'); setTimeout(()=> el.remove(), 300); }, (ev.ttl || 5000));
+      }
+
+      // debug: allow manual events via postMessage
+      window.addEventListener('message', (e) => { if (e.data && e.data.type === 'debug:event') showEvent(e.data.event); });
+    })();
+  </script>
+</body>
+</html>
