@@ -39,13 +39,17 @@ let widgetServer = null;
 let connectors = null;
 const tts = new TtsEngine();
 
+// viewers state
+let viewersInterval = null;
+let lastViewers = { byPlatform: {}, total: 0 };
+
 if (!app.requestSingleInstanceLock()) app.quit();
 
 const RENDERER = path.join(__dirname, "..", "renderer-dist", "index.html");
 
 // Runtime-иконка лежит внутри electron/**/* и точно попадает в asar.
 // Это исправляет пустой значок в трее portable и installer сборок.
-const APP_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256"><defs><linearGradient id="b" x1="24" y1="16" x2="232" y2="240"><stop stop-color="#8b5cf6"/><stop offset=".5" stop-color="#3b82f6"/><stop offset="1" stop-color="#22d3ee"/></linearGradient></defs><rect x="8" y="8" width="240" height="240" rx="58" fill="#090a14"/><rect x="16" y="16" width="224" height="224" rx="50" fill="url(#b)"/><path d="M64 72h128c18 0 32 14 32 32v48c0 18-14 32-32 32h-58l-29 25v-25H64c-18 0-32-14-32-32v-48c0-18 14-32 32-32Z" fill="#0a0b15" fill-opacity=".88"/><g fill="#fff"><rect x="65" y="112" width="13" height="34" rx="6.5"/><rect x="88" y="93" width="13" height="72" rx="6.5"/><rect x="111" y="78" width="13" height="102" rx="6.5"/><rect x="134" y="101" width="13" height="56" rx="6.5"/><rect x="157" y="88" width="13" height="82" rx="6.5"/><rect x="180" y="108" width="13" height="42" rx="6.5"/></g></svg>`;
+const APP_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256"><defs><linearGradient id="b" x1="24" y1="16" x2="232" y2="240"><stop stop-color="#8b5cf[...]>`;
 
 function appIcon(size) {
   let icon = nativeImage.createFromPath(path.join(__dirname, "assets", "yawachat-tray.jpg"));
@@ -74,6 +78,41 @@ function persist() {
 
 function refreshTrayMenu() {
   if (tray && !tray.isDestroyed()) tray.setContextMenu(trayMenu());
+}
+
+/* viewers aggregation */
+function computeAndBroadcastViewers() {
+  if (!connectors) return;
+  try {
+    // If connectors expose a summary helper, use it
+    if (typeof connectors.getViewersSummary === "function") {
+      const summary = connectors.getViewersSummary() || {};
+      lastViewers.byPlatform = summary.byPlatform || {};
+      lastViewers.total = Number(summary.total) || 0;
+    } else {
+      // Fallback: accumulate from connectors.list() and optional fields
+      const list = typeof connectors.list === "function" ? connectors.list() : [];
+      const byPlatform = {};
+      let total = 0;
+      for (const ch of list) {
+        const platform = ch.platform || "unknown";
+        let n = 0;
+        if (typeof ch.viewerCount === "number") n = ch.viewerCount;
+        else if (typeof ch.viewers === "number") n = ch.viewers;
+        else if (typeof connectors.getViewerCount === "function") {
+          try { n = Number(connectors.getViewerCount(ch.platform, ch.channelId) || 0); } catch { n = 0; }
+        }
+        byPlatform[platform] = (byPlatform[platform] || 0) + (Number(n) || 0);
+        total += Number(n) || 0;
+      }
+      lastViewers.byPlatform = byPlatform;
+      lastViewers.total = total;
+    }
+  } catch (e) {
+    console.error("[viewers] compute error:", e && e.message ? e.message : e);
+    lastViewers = { byPlatform: {}, total: 0 };
+  }
+  broadcast("sp:viewers", lastViewers);
 }
 
 /* ---------------- окна ---------------- */
@@ -270,10 +309,20 @@ function registerHotkeys() {
 
 /* ---------------- IPC ---------------- */
 
-ipcMain.on("channels:add", (_e, c) => connectors && connectors.add(c.platform, c.channelId));
-ipcMain.on("channels:remove", (_e, c) => connectors && connectors.remove(c.platform, c.channelId));
+ipcMain.on("channels:add", (_e, c) => {
+  if (connectors) connectors.add(c.platform, c.channelId);
+  // trigger immediate recompute for responsive UI
+  setTimeout(computeAndBroadcastViewers, 200);
+});
+ipcMain.on("channels:remove", (_e, c) => {
+  if (connectors) connectors.remove(c.platform, c.channelId);
+  setTimeout(computeAndBroadcastViewers, 200);
+});
 ipcMain.handle("channels:list", () => (connectors ? connectors.list() : []));
 ipcMain.on("net:diagnose", () => connectors && connectors.diagnose());
+
+// viewers IPC
+ipcMain.handle("viewers:get", () => lastViewers);
 
 ipcMain.handle("widget:url", () => (widgetServer ? widgetServer.url : ""));
 ipcMain.handle("widget:info", () => ({
@@ -367,6 +416,10 @@ app.on("will-quit", () => {
   try { if (connectors) connectors.stopAll(); } catch { /* noop */ }
   try { if (widgetServer) widgetServer.close(); } catch { /* noop */ }
   try { closeNet(); } catch { /* noop */ }
+  if (viewersInterval) {
+    clearInterval(viewersInterval);
+    viewersInterval = null;
+  }
 });
 
 // окно может быть скрыто в трей — приложение не должно завершаться
@@ -421,6 +474,12 @@ app.whenReady().then(async () => {
     for (const [ch, p] of pending) broadcast(ch, p);
     pending.length = 0;
     connectors.startAll();
+
+    // стартуем агрегацию просмотров каждые 10s и делаем первый прогон
+    try {
+      computeAndBroadcastViewers();
+      if (!viewersInterval) viewersInterval = setInterval(computeAndBroadcastViewers, 10 * 1000);
+    } catch (e) { /* noop */ }
   };
   if (mainWin) {
     mainWin.webContents.once("did-finish-load", () => setTimeout(startConnectors, 150));
